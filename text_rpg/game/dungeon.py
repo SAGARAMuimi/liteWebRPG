@@ -39,7 +39,7 @@ class DungeonManager:
         rate = ENCOUNTER_RATE.get(self.current_floor, 0.6)
         return random.random() < rate
 
-    def get_random_enemies(self) -> list[Enemy]:
+    def get_random_enemies(self, hp_mult: float = 1.0, atk_mult: float = 1.0) -> list[Enemy]:
         """現在の階層からランダムに複数体の敵を返す（clone して HP を独立させる）"""
         pool = Enemy.get_by_floor(self.db, self.dungeon.id, self.current_floor, boss=False)
         if not pool:
@@ -47,14 +47,21 @@ class DungeonManager:
         min_count, max_count = ENCOUNTER_COUNT.get(self.current_floor, (1, 2))
         count = random.randint(min_count, max_count)
         selected = random.choices(pool, k=count)
-        return [e.clone() for e in selected]
+        enemies = [e.clone() for e in selected]
+        for e in enemies:
+            e.hp = max(1, int(e.hp * hp_mult))
+            e.attack = max(1, int(e.attack * atk_mult))
+        return enemies
 
-    def get_boss(self) -> Enemy | None:
+    def get_boss(self, hp_mult: float = 1.0, atk_mult: float = 1.0) -> Enemy | None:
         """現在の階層のボスを返す（clone して HP を独立させる）"""
         bosses = Enemy.get_by_floor(self.db, self.dungeon.id, self.current_floor, boss=True)
         if not bosses:
             return None
-        return bosses[0].clone()
+        boss = bosses[0].clone()
+        boss.hp = max(1, int(boss.hp * hp_mult))
+        boss.attack = max(1, int(boss.attack * atk_mult))
+        return boss
 
     # ──────────────────────────────────────────────────────
     # 進行管理

@@ -7,14 +7,15 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 import streamlit as st
-from models.database import init_db, SessionLocal
+from models.database import init_db, migrate_db, SessionLocal
 from utils.auth import init_session_defaults, login_user, register_user, logout_user
 from utils.helpers import seed_initial_data
 from config import APP_TITLE
 
-# ─── 初期化 ────────────────────────────────────────────────
+# ─── 初期化 ──────────────────────────────────────────────
 st.set_page_config(page_title=APP_TITLE, page_icon="⚔️", layout="centered")
 init_db()
+migrate_db()  # 既存 DB へのカラム追加・データ修正（山筊幹）
 init_session_defaults()
 
 with SessionLocal() as db:

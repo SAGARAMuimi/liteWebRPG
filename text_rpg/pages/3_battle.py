@@ -14,7 +14,7 @@ from models.skill import Skill
 from game.battle import BattleEngine
 from utils.auth import check_login, get_current_user_id
 from utils.helpers import hp_bar, class_display_name
-from config import APP_TITLE
+from config import APP_TITLE, DIFFICULTY_PRESETS
 
 st.set_page_config(page_title=f"戦闘 | {APP_TITLE}", page_icon="⚔️", layout="wide")
 check_login()
@@ -55,8 +55,16 @@ if "show_skill_panel" not in st.session_state:
     st.session_state["show_skill_panel"] = False
 if "pending_skill_id" not in st.session_state:
     st.session_state["pending_skill_id"] = None
+if "battle_buffs" not in st.session_state:
+    st.session_state["battle_buffs"] = {}
 
-engine = BattleEngine(party, enemies)
+_diff_cfg = DIFFICULTY_PRESETS[st.session_state.get("difficulty", "normal")]
+engine = BattleEngine(
+    party, enemies,
+    heal_mult=_diff_cfg["heal_mult"],
+    exp_mult=_diff_cfg["exp_mult"],
+    buffs=st.session_state["battle_buffs"],
+)
 engine.turn = st.session_state["battle_turn"]
 engine._defending = st.session_state["defending_chars"]
 
@@ -93,6 +101,7 @@ if engine.is_all_enemies_dead():
         st.session_state["show_skill_panel"] = False
         st.session_state["battle_exp"] = 0
         st.session_state["battle_leveled"] = []
+        st.session_state["battle_buffs"] = {}
         st.switch_page("pages/2_dungeon.py")
     st.stop()
 
@@ -110,11 +119,13 @@ if engine.is_party_wiped():
         st.session_state["battle_turn"] = 1
         st.session_state["defending_chars"] = set()
         st.session_state["show_skill_panel"] = False
+        st.session_state["battle_buffs"] = {}
         st.switch_page("pages/1_character.py")
     st.stop()
 
 # ─── 敵ステータス ────────────────────────────────────────────
 st.subheader("👾 敵")
+_buffs = st.session_state.get("battle_buffs", {})
 ecols = st.columns(len(enemies))
 for i, enemy in enumerate(enemies):
     with ecols[i]:
@@ -124,6 +135,14 @@ for i, enemy in enumerate(enemies):
             st.caption("⭐ BOSS")
         st.text(hp_bar(enemy.hp, enemy.hp + 30))  # 表示用（元HPがないため近似）
         st.text(f"ATK {enemy.attack}  DEF {enemy.defense}")
+        _ekey = f"e_{enemy.id}"
+        _ebuffs = _buffs.get(_ekey, [])
+        if _ebuffs:
+            _tags = "  ".join(
+                f"{'⬆️' if b['amount'] > 0 else '⬇️'}{'ATK' if b['stat'] == 'attack' else 'DEF'}({b['turns_left']}T)"
+                for b in _ebuffs
+            )
+            st.caption(_tags)
 
 st.divider()
 
@@ -138,6 +157,14 @@ for i, chara in enumerate(party):
         st.caption(class_display_name(chara.class_type))
         st.text(hp_bar(chara.hp, chara.max_hp))
         st.text(f"MP {chara.mp}/{chara.max_mp}")
+        _ckey = f"c_{chara.id}"
+        _cbuffs = _buffs.get(_ckey, [])
+        if _cbuffs:
+            _tags = "  ".join(
+                f"{'⬆️' if b['amount'] > 0 else '⬇️'}{'ATK' if b['stat'] == 'attack' else 'DEF'}({b['turns_left']}T)"
+                for b in _cbuffs
+            )
+            st.caption(_tags)
 
 st.divider()
 
@@ -223,6 +250,10 @@ btn_col1, btn_col2, btn_col3 = st.columns(3)
 def do_enemy_turn():
     msgs = engine.enemy_action()
     st.session_state["battle_log"].extend(msgs)
+    # バフ/デバフのカウントダウン
+    tick_msgs = engine.tick_buffs()
+    if tick_msgs:
+        st.session_state["battle_log"].extend(tick_msgs)
     st.session_state["battle_turn"] = engine.turn
     st.session_state["defending_chars"] = engine._defending
     # HP を DB に保存
@@ -260,19 +291,31 @@ if st.session_state.get("show_skill_panel"):
     if not skills:
         st.info("使えるスキルがありません。")
     else:
-        st.caption("⬆️ 「対象を選ぶ」で回復先・攻撃先を選択してからスキルを押してください")
+        st.caption("⬆️ バフ系は自動で対象を判定。回復・攻撃は「対象を選ぶ」で選択してください")
         skill_cols = st.columns(len(skills))
         for i, skill in enumerate(skills):
             with skill_cols[i]:
                 can_use = attacker.mp >= skill.mp_cost
-                effect_icon = {"attack": "⚔️", "heal": "💚", "buff": "⬆️"}.get(skill.effect_type, "")
+                effect_icon = {
+                    "attack":    "⚔️",
+                    "heal":      "💚",
+                    "buff":      "⬆️",
+                    "buff_atk":  "⬆️ATK",
+                    "buff_def":  "⬆️DEF",
+                    "debuff_atk": "⬇️ATK",
+                    "debuff_def": "⬇️DEF",
+                }.get(skill.effect_type, "")
                 label = f"{effect_icon} {skill.name}\nMP:{skill.mp_cost} PWR:{skill.power}"
                 if st.button(label, key=f"skill_{skill.id}", disabled=not can_use, use_container_width=True):
-                    if skill.effect_type == "heal":
-                        # 💚 味方が選択されていれば使用、敵選択時は術者自身を回復
+                    etype = skill.effect_type
+                    if etype == "heal":
                         msg = engine.player_action(attacker, "skill", target=target_heal, skill=skill)
+                    elif etype in ("buff_atk", "buff_def", "buff"):
+                        # バフは engine の target_type に従って自動処理（target は attacker を渡す）
+                        msg = engine.player_action(attacker, "skill", target=attacker, skill=skill)
+                    elif etype in ("debuff_atk", "debuff_def"):
+                        msg = engine.player_action(attacker, "skill", target=target_enemy, skill=skill)
                     else:
-                        # 👾 敵が選択されていれば使用、味方選択時は先頭の生存敵を攻撃
                         msg = engine.player_action(attacker, "skill", target=target_enemy, skill=skill)
                     st.session_state["battle_log"].append(msg)
                     st.session_state["show_skill_panel"] = False

@@ -35,16 +35,16 @@ INSERT OR IGNORE INTO skills (id, name, class_type, mp_cost, power, effect_type)
   (5, 'ポーション',   'all',      0, 30, 'heal');
 
 -- スキル（追加4クラス）
-INSERT OR IGNORE INTO skills (id, name, class_type, mp_cost, power, effect_type) VALUES
+INSERT OR IGNORE INTO skills (id, name, class_type, mp_cost, power, effect_type, target_type, duration) VALUES
   -- 騎士: 防御バフ（挑発）・攻撃
-  (6,  '挑発',       'knight',   4, 15, 'buff'),
-  (7,  'シールドバッシュ', 'knight', 6, 15, 'attack'),
+  (6,  '挑発',            'knight',   4,  5, 'buff_def', 'self',       3),
+  (7,  'シールドバッシュ', 'knight',   6, 15, 'attack',   'enemy',      0),
   -- 弓使い: 高威力単体攻撃
-  (8,  '連射',       'archer',   7, 28, 'attack'),
-  (9,  '矢雨',       'archer',  10, 35, 'attack'),
+  (8,  '連射',        'archer',   7, 28, 'attack',   'enemy',      0),
+  (9,  '矢雨',        'archer',  10, 35, 'attack',   'enemy',      0),
   -- 武道家: MP不要スキル
-  (10, '気合い',     'monk',     0, 15, 'buff'),
-  (11, '連打',       'monk',     0, 12, 'attack'),
-  -- 吟遊詩人: バフ・回復
-  (12, '鼓舞の歌',   'bard',     8, 15, 'buff'),
-  (13, '癒しの歌',   'bard',    14, 55, 'heal');
+  (10, '気合い',      'monk',     0,  4, 'buff_atk', 'self',       3),
+  (11, '連打',        'monk',     0, 12, 'attack',   'enemy',      0),
+  -- 吟遊詩人: 全体バフ・回復
+  (12, '鼓舞の歌',    'bard',     8,  3, 'buff_atk', 'all_allies', 3),
+  (13, '癒しの歌',    'bard',    14, 55, 'heal',     'ally',       0);

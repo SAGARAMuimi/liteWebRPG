@@ -16,7 +16,12 @@ class Skill(Base):
     class_type: Mapped[str] = mapped_column(String(16), nullable=False)  # "all" で全クラス
     mp_cost: Mapped[int] = mapped_column(nullable=False)
     power: Mapped[int] = mapped_column(nullable=False)
-    effect_type: Mapped[str] = mapped_column(String(16), nullable=False)  # attack / heal / buff
+    effect_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    # effect_type: attack / heal / buff_atk / buff_def / debuff_atk / debuff_def
+    target_type: Mapped[str] = mapped_column(String(16), nullable=False, server_default="self")
+    # target_type: self / ally / all_allies / enemy / all_enemies
+    duration: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    # duration: バフ/デバフの持続ターン数（0 = 持続なし）
 
     @staticmethod
     def get_for_class(db: Session, class_type: str) -> list["Skill"]:

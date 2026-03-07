@@ -69,3 +69,15 @@ PARTY_SIZE: int = 4
 
 # ─── UI設定 ───────────────────────────────────────────────
 APP_TITLE: str = "⚔️ liteWebRPG"
+
+# ─── 難易度設定 ────────────────────────────────────────────
+# 各倍率の意味:
+#   enemy_hp_mult  : 敵の最大HPへの倍率
+#   enemy_atk_mult : 敵の攻撃力への倍率
+#   exp_mult       : 獲得経験値への倍率
+#   heal_mult      : スキルによる回復量への倍率
+DIFFICULTY_PRESETS: dict[str, dict] = {
+    "easy":   {"label": "🟢 やさしい",   "enemy_hp_mult": 0.7, "enemy_atk_mult": 0.8, "exp_mult": 1.5, "heal_mult": 1.3},
+    "normal": {"label": "🟡 ふつう",     "enemy_hp_mult": 1.0, "enemy_atk_mult": 1.0, "exp_mult": 1.0, "heal_mult": 1.0},
+    "hard":   {"label": "🔴 むずかしい", "enemy_hp_mult": 1.5, "enemy_atk_mult": 1.2, "exp_mult": 0.8, "heal_mult": 0.8},
+}

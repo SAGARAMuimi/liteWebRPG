@@ -19,6 +19,8 @@ def init_session_defaults() -> None:
         "battle_log": [],
         "defending_chars": set(),
         "battle_result": None,
+        "difficulty": "normal",
+        "battle_buffs": {},
     }
     for key, value in defaults.items():
         if key not in st.session_state:

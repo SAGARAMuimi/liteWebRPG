@@ -14,7 +14,7 @@ from models.character import PartyMember
 from game.dungeon import DungeonManager
 from utils.auth import check_login, get_current_user_id
 from utils.helpers import hp_bar, class_display_name
-from config import APP_TITLE, ROOMS_PER_FLOOR
+from config import APP_TITLE, ROOMS_PER_FLOOR, DIFFICULTY_PRESETS
 
 st.set_page_config(page_title=f"ダンジョン探索 | {APP_TITLE}", page_icon="🏰", layout="wide")
 check_login()
@@ -57,6 +57,30 @@ with SessionLocal() as db:
 # ─── タイトル ───────────────────────────────────────────────
 st.title("🏰 ダンジョン探索")
 st.subheader(f"📍 {dungeon_name}  {current_floor}F / {dungeon_max_floor}F")
+
+# ─── 難易度選択 ──────────────────────────────────────────────
+diff_keys   = list(DIFFICULTY_PRESETS.keys())
+diff_labels = [DIFFICULTY_PRESETS[k]["label"] for k in diff_keys]
+current_diff = st.session_state.get("difficulty", "normal")
+current_diff_idx = diff_keys.index(current_diff) if current_diff in diff_keys else 1
+
+in_dungeon = st.session_state.get("current_room", 0) > 0
+if in_dungeon:
+    st.caption(f"難易度: {DIFFICULTY_PRESETS[current_diff]['label']}  （探索中は変更不可）")
+else:
+    selected_label = st.selectbox(
+        "難易度",
+        diff_labels,
+        index=current_diff_idx,
+        key="difficulty_select",
+    )
+    new_diff = diff_keys[diff_labels.index(selected_label)]
+    if new_diff != current_diff:
+        st.session_state["difficulty"] = new_diff
+        st.rerun()
+
+diff_cfg = DIFFICULTY_PRESETS[st.session_state.get("difficulty", "normal")]
+
 st.divider()
 
 # ─── 全クリア表示 ────────────────────────────────────────────
@@ -127,7 +151,10 @@ with col1:
 
             if is_boss_room:
                 # ボス戦
-                boss = mgr.get_boss()
+                boss = mgr.get_boss(
+                    hp_mult=diff_cfg["enemy_hp_mult"],
+                    atk_mult=diff_cfg["enemy_atk_mult"],
+                )
                 if boss:
                     st.session_state["battle_enemies"] = [boss]
                     st.session_state["battle_log"] = []
@@ -140,7 +167,10 @@ with col1:
                 # 通常部屋
                 st.session_state["dungeon_log"].append(f"🚪 {current_floor}F - 部屋{room} に入った。")
                 if mgr.check_encounter():
-                    enemies = mgr.get_random_enemies()
+                    enemies = mgr.get_random_enemies(
+                        hp_mult=diff_cfg["enemy_hp_mult"],
+                        atk_mult=diff_cfg["enemy_atk_mult"],
+                    )
                     if enemies:
                         st.session_state["battle_enemies"] = enemies
                         st.session_state["battle_log"] = []

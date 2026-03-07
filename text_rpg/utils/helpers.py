@@ -66,17 +66,17 @@ def seed_initial_data(db) -> None:
     # スキル（追加4クラス）
     db.add_all([
         # 騎士
-        Skill(name="挑発",           class_type="knight", mp_cost=4,  power=15, effect_type="buff"),
-        Skill(name="シールドバッシュ", class_type="knight", mp_cost=6,  power=15, effect_type="attack"),
+        Skill(name="挑発",           class_type="knight", mp_cost=4,  power=5,  effect_type="buff_def", target_type="self",       duration=3),
+        Skill(name="シールドバッシュ", class_type="knight", mp_cost=6,  power=15, effect_type="attack",   target_type="enemy",      duration=0),
         # 弓使い
-        Skill(name="連射",   class_type="archer", mp_cost=7,  power=28, effect_type="attack"),
-        Skill(name="矢雨",   class_type="archer", mp_cost=10, power=35, effect_type="attack"),
+        Skill(name="連射",   class_type="archer", mp_cost=7,  power=28, effect_type="attack",   target_type="enemy",      duration=0),
+        Skill(name="矢雨",   class_type="archer", mp_cost=10, power=35, effect_type="attack",   target_type="enemy",      duration=0),
         # 武道家
-        Skill(name="気合い", class_type="monk",   mp_cost=0,  power=15, effect_type="buff"),
-        Skill(name="連打",   class_type="monk",   mp_cost=0,  power=12, effect_type="attack"),
+        Skill(name="気合い", class_type="monk",   mp_cost=0,  power=4,  effect_type="buff_atk", target_type="self",       duration=3),
+        Skill(name="連打",   class_type="monk",   mp_cost=0,  power=12, effect_type="attack",   target_type="enemy",      duration=0),
         # 吟遊詩人
-        Skill(name="鼓舞の歌", class_type="bard", mp_cost=8,  power=15, effect_type="buff"),
-        Skill(name="癒しの歌", class_type="bard", mp_cost=14, power=55, effect_type="heal"),
+        Skill(name="鼓舞の歌", class_type="bard", mp_cost=8,  power=3,  effect_type="buff_atk", target_type="all_allies", duration=3),
+        Skill(name="癒しの歌", class_type="bard", mp_cost=14, power=55, effect_type="heal",     target_type="ally",       duration=0),
     ])
 
     db.commit()
