@@ -31,6 +31,10 @@ party = st.session_state["party"]
 enemies = st.session_state.get("battle_enemies", [])
 
 if not party or not enemies:
+    # battle_result が残っている場合は戦闘直後の正常遷移（switch_page の再レンダリング等）
+    # 警告を出さずダンジョンへ自動遷移する
+    if st.session_state.get("battle_result"):
+        st.switch_page("pages/2_dungeon.py")
     st.warning("戦闘データがありません。")
     st.page_link("pages/2_dungeon.py", label="🏰 ダンジョンへ戻る")
     st.stop()
@@ -63,41 +67,49 @@ st.divider()
 
 # ─── 勝敗チェック ────────────────────────────────────────────
 if engine.is_all_enemies_dead():
-    total_exp = engine.get_total_exp()
-    st.success(f"🎉 勝利！  獲得 EXP: {total_exp}")
-    leveled = []
-    with SessionLocal() as db:
-        for chara in party:
-            if engine.is_party_wiped():
-                break
-            if chara.is_alive():
-                up = chara.gain_exp(db, total_exp)
-                if up:
-                    leveled.append(chara.name)
-    if leveled:
-        st.info(f"レベルアップ！: {', '.join(leveled)}")
-    st.session_state["battle_result"] = "win"
-    st.session_state["battle_enemies"] = []
-    st.session_state["battle_turn"] = 1
-    st.session_state["defending_chars"] = set()
-    st.session_state["show_skill_panel"] = False
+    # EXP付与は初回レンダリング時のみ（ボタンクリックによる再レンダリングで二重付与しない）
+    if st.session_state.get("battle_result") != "win":
+        total_exp = engine.get_total_exp()
+        leveled: list[str] = []
+        with SessionLocal() as db:
+            for chara in party:
+                if engine.is_party_wiped():
+                    break
+                if chara.is_alive():
+                    up = chara.gain_exp(db, total_exp)
+                    if up:
+                        leveled.append(chara.name)
+        st.session_state["battle_result"] = "win"
+        st.session_state["battle_exp"] = total_exp
+        st.session_state["battle_leveled"] = leveled
+    st.success(f"🎉 勝利！  獲得 EXP: {st.session_state['battle_exp']}")
+    if st.session_state.get("battle_leveled"):
+        st.info(f"レベルアップ！: {', '.join(st.session_state['battle_leveled'])}")
+    # battle_enemies のクリアはボタン内で行う（先にクリアすると再レンダリング時に警告が出る）
     if st.button("ダンジョンへ戻る"):
+        st.session_state["battle_enemies"] = []
+        st.session_state["battle_turn"] = 1
+        st.session_state["defending_chars"] = set()
+        st.session_state["show_skill_panel"] = False
+        st.session_state["battle_exp"] = 0
+        st.session_state["battle_leveled"] = []
         st.switch_page("pages/2_dungeon.py")
     st.stop()
 
 if engine.is_party_wiped():
     st.error("💀 全滅…  ゲームオーバー")
-    st.session_state["battle_result"] = "lose"
-    st.session_state["battle_enemies"] = []
-    st.session_state["battle_turn"] = 1
-    st.session_state["defending_chars"] = set()
-    st.session_state["show_skill_panel"] = False
-    # HP を全キャラ 1 に回復（ゲームオーバー後に再挑戦できるように）
-    with SessionLocal() as db:
-        for chara in party:
-            chara.hp = 1
-            chara.save(db)
+    # HP回復・セッションクリアは初回のみ
+    if st.session_state.get("battle_result") != "lose":
+        with SessionLocal() as db:
+            for chara in party:
+                chara.hp = 1
+                chara.save(db)
+        st.session_state["battle_result"] = "lose"
     if st.button("キャラクター管理へ戻る"):
+        st.session_state["battle_enemies"] = []
+        st.session_state["battle_turn"] = 1
+        st.session_state["defending_chars"] = set()
+        st.session_state["show_skill_panel"] = False
         st.switch_page("pages/1_character.py")
     st.stop()
 
