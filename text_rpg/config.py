@@ -16,6 +16,10 @@ CLASS_NAMES: dict[str, str] = {
     "mage":    "魔法使い",
     "thief":   "盗賊",
     "priest":  "僧侶",
+    "knight":  "騎士",
+    "archer":  "弓使い",
+    "monk":    "武道家",
+    "bard":    "吟遊詩人",
 }
 
 # クラス別初期ステータス
@@ -24,6 +28,22 @@ CLASS_INITIAL_STATS: dict[str, dict] = {
     "mage":    {"max_hp": 70,  "max_mp": 80,  "attack": 10, "defense": 5},
     "thief":   {"max_hp": 90,  "max_mp": 40,  "attack": 16, "defense": 8},
     "priest":  {"max_hp": 100, "max_mp": 60,  "attack": 12, "defense": 10},
+    "knight":  {"max_hp": 140, "max_mp": 15,  "attack": 15, "defense": 16},
+    "archer":  {"max_hp": 85,  "max_mp": 35,  "attack": 17, "defense": 7},
+    "monk":    {"max_hp": 130, "max_mp": 10,  "attack": 20, "defense": 10},
+    "bard":    {"max_hp": 80,  "max_mp": 70,  "attack": 8,  "defense": 8},
+}
+
+# クラス別説明文
+CLASS_DESCRIPTIONS: dict[str, str] = {
+    "warrior": "高い攻撃力と防御力を誇る前衛の要。バランス型の万能戦士。",
+    "mage":    "強力な魔法で敵を殲滅する。HPは低いが魔法の威力は随一。",
+    "thief":   "素早い連携攻撃と変幻自在の技を持つ。MP消費も控えめ。",
+    "priest":  "味方を癒す回復の要。直接攻撃は苦手だが後衛として不可欠。",
+    "knight":  "最高の防御力を誇る守護者。仲間への攻撃を引きつける挑発が得意。",
+    "archer":  "遠距離から精確な攻撃を放つ弓の達人。攻撃力は高いが防御は低い。",
+    "monk":    "武器を持たない格闘技の求道者。MP不要の技が多く継戦能力が高い。",
+    "bard":    "歌と演奏でパーティを鼓舞する支援の専門家。MPが豊富で補助が得意。",
 }
 
 # ─── レベルアップ設定 ─────────────────────────────────────

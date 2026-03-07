@@ -12,7 +12,7 @@ from models.database import SessionLocal
 from models.character import Character, PartyMember
 from utils.auth import check_login, get_current_user_id
 from utils.helpers import class_display_name, hp_bar
-from config import CLASS_INITIAL_STATS, PARTY_SIZE, APP_TITLE
+from config import CLASS_INITIAL_STATS, PARTY_SIZE, APP_TITLE, CLASS_DESCRIPTIONS
 
 st.set_page_config(page_title=f"キャラクター管理 | {APP_TITLE}", page_icon="👤", layout="wide")
 check_login()
@@ -53,10 +53,16 @@ if st.session_state.get("char_created_name"):
 if "char_form_counter" not in st.session_state:
     st.session_state["char_form_counter"] = 0
 
+# クラス選択はフォーム外に置くことで切り替え時にリアクティブ更新される
+class_options = {class_display_name(k): k for k in CLASS_INITIAL_STATS.keys()}
+class_label = st.selectbox("クラス", list(class_options.keys()), key="new_char_class")
+selected_key = class_options[class_label]
+st.caption(CLASS_DESCRIPTIONS.get(selected_key, ""))
+s = CLASS_INITIAL_STATS[selected_key]
+st.text(f"HP {s['max_hp']}  MP {s['max_mp']}  ATK {s['attack']}  DEF {s['defense']}")
+
 with st.form(f"create_char_form_{st.session_state['char_form_counter']}"):
     char_name = st.text_input("キャラクター名")
-    class_options = {class_display_name(k): k for k in CLASS_INITIAL_STATS.keys()}
-    class_label = st.selectbox("クラス", list(class_options.keys()))
     create_btn = st.form_submit_button("作成")
 
 if create_btn:
@@ -65,7 +71,7 @@ if create_btn:
     elif len(characters) >= 8:
         st.warning("キャラクターは最大8名まで登録できます。")
     else:
-        class_type = class_options[class_label]
+        class_type = class_options[st.session_state["new_char_class"]]
         with SessionLocal() as db:
             from sqlalchemy.exc import IntegrityError
             try:

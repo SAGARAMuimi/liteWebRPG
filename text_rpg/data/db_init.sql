@@ -26,10 +26,25 @@ INSERT OR IGNORE INTO enemies (id, name, dungeon_id, floor, hp, attack, defense,
   (11, 'オークチーフ',  1, 2,  90, 15,  8,  80, 1),
   (12, 'ダークロード',  1, 3, 120, 20, 10, 100, 1);
 
--- スキル
+-- スキル（既存4クラス）
 INSERT OR IGNORE INTO skills (id, name, class_type, mp_cost, power, effect_type) VALUES
   (1, 'ファイア',     'mage',    10, 30, 'attack'),
   (2, 'ヒール',       'priest',   8, 40, 'heal'),
   (3, 'バックスタブ', 'thief',    6, 25, 'attack'),
   (4, 'チャージ',     'warrior',  5, 20, 'attack'),
   (5, 'ポーション',   'all',      0, 30, 'heal');
+
+-- スキル（追加4クラス）
+INSERT OR IGNORE INTO skills (id, name, class_type, mp_cost, power, effect_type) VALUES
+  -- 騎士: 防御バフ（挑発）・攻撃
+  (6,  '挑発',       'knight',   4, 15, 'buff'),
+  (7,  'シールドバッシュ', 'knight', 6, 15, 'attack'),
+  -- 弓使い: 高威力単体攻撃
+  (8,  '連射',       'archer',   7, 28, 'attack'),
+  (9,  '矢雨',       'archer',  10, 35, 'attack'),
+  -- 武道家: MP不要スキル
+  (10, '気合い',     'monk',     0, 15, 'buff'),
+  (11, '連打',       'monk',     0, 12, 'attack'),
+  -- 吟遊詩人: バフ・回復
+  (12, '鼓舞の歌',   'bard',     8, 15, 'buff'),
+  (13, '癒しの歌',   'bard',    14, 55, 'heal');
