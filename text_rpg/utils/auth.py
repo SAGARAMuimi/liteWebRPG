@@ -21,6 +21,7 @@ def init_session_defaults() -> None:
         "battle_result": None,
         "difficulty": "normal",
         "battle_buffs": {},
+        "battle_hate": {},
     }
     for key, value in defaults.items():
         if key not in st.session_state:

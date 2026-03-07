@@ -78,6 +78,14 @@ APP_TITLE: str = "⚔️ liteWebRPG"
 #   heal_mult      : スキルによる回復量への倍率
 DIFFICULTY_PRESETS: dict[str, dict] = {
     "easy":   {"label": "🟢 やさしい",   "enemy_hp_mult": 0.7, "enemy_atk_mult": 0.8, "exp_mult": 1.5, "heal_mult": 1.3},
-    "normal": {"label": "🟡 ふつう",     "enemy_hp_mult": 1.0, "enemy_atk_mult": 1.0, "exp_mult": 1.0, "heal_mult": 1.0},
+    "normal": {"label": "🟡 ふつう",    "enemy_hp_mult": 1.0, "enemy_atk_mult": 1.0, "exp_mult": 1.0, "heal_mult": 1.0},
     "hard":   {"label": "🔴 むずかしい", "enemy_hp_mult": 1.5, "enemy_atk_mult": 1.2, "exp_mult": 0.8, "heal_mult": 0.8},
+}
+
+# ─── 状態異常定義 ────────────────────────────────────────────
+STATUS_AILMENTS: dict[str, dict] = {
+    "poison":   {"icon": "☠️",  "label": "毒"},
+    "stun":     {"icon": "💫",  "label": "スタン"},
+    "def_down": {"icon": "🔓",  "label": "防御低下"},
+    "silence":  {"icon": "🤐",  "label": "沈黙"},
 }

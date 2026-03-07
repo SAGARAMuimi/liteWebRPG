@@ -160,3 +160,191 @@ class TestWinLose:
         e2 = make_enemy(hp=0, exp_reward=20)
         engine = BattleEngine([chara], [e1, e2])
         assert engine.get_total_exp() == 30
+
+
+# ─── ヘイト/ターゲット制御テスト ──────────────────────
+class TestHateSystem:
+    def setup_method(self):
+        self.c1 = make_character(name="勇者", hp=100)
+        self.c1.id = 1
+        self.c2 = make_character(name="騎士", class_type="knight", hp=140)
+        self.c2.id = 2
+        self.enemy = make_enemy(attack=10, defense=0)
+        self.engine = BattleEngine([self.c1, self.c2], [self.enemy])
+
+    def test_initial_hate_is_set(self):
+        """初期ヘイトが全キャラに設定される"""
+        assert self.engine.hate[self.c1.id] == 10
+        assert self.engine.hate[self.c2.id] == 10
+
+    def test_add_hate_increments(self):
+        """add_hate がヘイト値を加算する"""
+        self.engine.add_hate(self.c1, 50)
+        assert self.engine.hate[self.c1.id] == 60
+
+    def test_attack_increases_hate(self):
+        """攻撃後にヘイトが増加する"""
+        before = self.engine.hate[self.c1.id]
+        self.engine.player_action(self.c1, "attack", target=self.enemy)
+        assert self.engine.hate[self.c1.id] > before
+
+    def test_defend_increases_hate_slightly(self):
+        """防御でヘイトが少し増える"""
+        before = self.engine.hate[self.c1.id]
+        self.engine.player_action(self.c1, "defend")
+        assert self.engine.hate[self.c1.id] == before + 5
+
+    def test_select_target_prefers_high_hate(self):
+        """ヘイトが高いキャラが選ばれやすい"""
+        # c2 のヘイトを大幅に上げる
+        self.engine.hate[self.c2.id] = 1000
+        self.engine.hate[self.c1.id] = 10
+        # 100 回引いて c2 が媚鄧混じりの大多数を占めることを確認
+        results = [self.engine._select_target().id for _ in range(100)]
+        assert results.count(self.c2.id) > 70
+
+    def test_taunt_forces_target(self):
+        """挑発中のキャラが必ず選ばれる"""
+        # c1 のヘイトを大幅上げても、c2 が挑発中なら c2 が選ばれる
+        self.engine.hate[self.c1.id] = 9999
+        self.engine.hate[self.c2.id] = 10
+        key2 = self.engine._entity_key(self.c2)
+        self.engine.buffs[key2] = [{"stat": "defense", "amount": 5, "turns_left": 3, "source": "挑発", "taunt": True}]
+        for _ in range(20):
+            assert self.engine._select_target().id == self.c2.id
+
+    def test_taunt_expires_after_tick(self):
+        """挑発有効期限が切れると通常選択に戻る"""
+        key2 = self.engine._entity_key(self.c2)
+        self.engine.buffs[key2] = [{"stat": "defense", "amount": 5, "turns_left": 1, "source": "挑発", "taunt": True}]
+        self.engine.tick_buffs()  # ターン終了で削除
+        assert key2 not in self.engine.buffs or not any(b.get("taunt") for b in self.engine.buffs.get(key2, []))
+
+    def test_select_target_returns_none_if_all_dead(self):
+        """味方全滅時に Noneを返す"""
+        self.c1.hp = 0
+        self.c2.hp = 0
+        assert self.engine._select_target() is None
+
+
+# ─── 状態異常テスト ───────────────────────────────────────
+class TestStatusAilment:
+    def setup_method(self):
+        self.chara = make_character(name="勇者", hp=100, mp=50, attack=15, defense=8)
+        self.chara.id = 1
+        self.enemy = make_enemy(name="スライム", hp=100, attack=5, defense=2)
+        self.enemy.id = 10
+        self.enemy.status_resistance = ""
+        self.engine = BattleEngine([self.chara], [self.enemy])
+
+    def _make_status_skill(self, effect_type, mp_cost=8, target_type="enemy", duration=3):
+        s = Skill()
+        s.id = 99
+        s.name = f"テスト{effect_type}"
+        s.effect_type = effect_type
+        s.mp_cost = mp_cost
+        s.power = 0
+        s.target_type = target_type
+        s.duration = duration
+        return s
+
+    # ── apply_status / has_status ──────────────────────────────────────────────
+
+    def test_apply_status_to_enemy(self):
+        """apply_status で敵に状態異常が付与される"""
+        msg = self.engine.apply_status(self.enemy, "poison", 3, "テスト")
+        assert self.engine.has_status(self.enemy, "poison")
+        assert "毒" in msg
+
+    def test_has_status_returns_false_when_no_ailment(self):
+        """状態異常がないときは False を返す"""
+        assert not self.engine.has_status(self.chara, "stun")
+
+    # ── スタン ────────────────────────────────────────────────────────────────
+
+    def test_stun_blocks_player_action(self):
+        """スタン中はプレイヤーの全行動がスキップされる"""
+        self.engine.apply_status(self.chara, "stun", 2, "テスト")
+        msg = self.engine.player_action(self.chara, "attack", target=self.enemy)
+        assert "スタン" in msg
+
+    def test_stun_blocks_enemy_action(self):
+        """スタン中は敵の行動がスキップされる"""
+        self.engine.apply_status(self.enemy, "stun", 2, "テスト")
+        msgs = self.engine.enemy_action()
+        assert any("スタン" in m for m in msgs)
+        # スタン中は敵が攻撃しないのでダメージなし
+        assert self.chara.hp == self.chara.max_hp
+
+    # ── 沈黙 ─────────────────────────────────────────────────────────────────
+
+    def test_silence_blocks_skill_only(self):
+        """沈黙中はスキルが使えないが通常攻撃はできる"""
+        self.engine.apply_status(self.chara, "silence", 2, "テスト")
+        skill = self._make_status_skill("attack", mp_cost=5)
+        msg = self.engine.player_action(self.chara, "skill", target=self.enemy, skill=skill)
+        assert "沈黙" in msg
+
+    def test_silence_does_not_block_attack(self):
+        """沈黙中でも通常攻撃は実行される"""
+        self.engine.apply_status(self.chara, "silence", 2, "テスト")
+        before_hp = self.enemy.hp
+        self.engine.player_action(self.chara, "attack", target=self.enemy)
+        assert self.enemy.hp < before_hp  # ダメージあり
+
+    # ── 毒 ───────────────────────────────────────────────────────────────────
+
+    def test_poison_deals_damage_on_tick(self):
+        """毒状態のエンティティはtick_buffsでダメージを受ける"""
+        self.enemy.max_hp = 100
+        self.engine.apply_status(self.enemy, "poison", 3, "テスト")
+        before_hp = self.enemy.hp
+        logs = self.engine.tick_buffs()
+        assert self.enemy.hp < before_hp
+        assert any("毒" in l for l in logs)
+
+    def test_poison_via_skill(self):
+        """poison スキルで敵に毒が付与される"""
+        skill = self._make_status_skill("poison")
+        self.engine.player_action(self.chara, "skill", target=self.enemy, skill=skill)
+        assert self.engine.has_status(self.enemy, "poison")
+
+    # ── 防御低下 ──────────────────────────────────────────────────────────────
+
+    def test_def_down_halves_defense(self):
+        """def_down が付与されると有効防御力が半減する"""
+        base_def = self.engine.get_effective_defense(self.enemy)
+        self.engine.apply_status(self.enemy, "def_down", 3, "テスト")
+        halved_def = self.engine.get_effective_defense(self.enemy)
+        assert halved_def <= base_def // 2 + 1
+
+    # ── ボス耐性 ─────────────────────────────────────────────────────────────
+
+    def test_boss_resists_stun(self):
+        """status_resistance='stun' の敵にスタンが無効化される"""
+        boss = make_enemy(name="ボス", hp=200)
+        boss.id = 99
+        boss.status_resistance = "stun"
+        boss.is_boss = True
+        engine = BattleEngine([self.chara], [boss])
+        msg = engine.apply_status(boss, "stun", 2, "テスト")
+        assert "無効化" in msg
+        assert not engine.has_status(boss, "stun")
+
+    # ── 期限切れ ─────────────────────────────────────────────────────────────
+
+    def test_status_expires_after_duration(self):
+        """duration ターン後に状態異常が消える"""
+        self.engine.apply_status(self.enemy, "poison", 1, "テスト")
+        self.engine.tick_buffs()  # 1ターン経過 → 期限切れ
+        assert not self.engine.has_status(self.enemy, "poison")
+
+    # ── cure スキル ──────────────────────────────────────────────────────────
+
+    def test_cure_removes_status(self):
+        """cure スキルで状態異常が除去される"""
+        self.engine.apply_status(self.chara, "poison", 3, "テスト")
+        assert self.engine.has_status(self.chara, "poison")
+        cure = self._make_status_skill("cure", mp_cost=5, target_type="ally", duration=0)
+        self.engine.player_action(self.chara, "skill", target=self.chara, skill=cure)
+        assert not self.engine.has_status(self.chara, "poison")

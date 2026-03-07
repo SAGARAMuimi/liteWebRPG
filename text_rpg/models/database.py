@@ -62,3 +62,34 @@ def migrate_db() -> None:
         for sql in updates:
             conn.execute(text(sql))
         conn.commit()
+
+        # enemies テーブルへ status_resistance カラム追加
+        try:
+            conn.execute(text("ALTER TABLE enemies ADD COLUMN status_resistance VARCHAR(64) DEFAULT ''"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        # ボスにスタン耐性を付与（未設定のもののみ）
+        conn.execute(text(
+            "UPDATE enemies SET status_resistance='stun' "
+            "WHERE is_boss=1 AND (status_resistance IS NULL OR status_resistance='')"
+        ))
+        conn.commit()
+
+        # 状態異常スキルを追加（既存 DB への冪等 INSERT）
+        status_skills = [
+            (14, "浄化",     "priest",  5,  0, "cure",     "ally",        0),
+            (15, "毒霧",     "mage",   10,  0, "poison",   "all_enemies", 3),
+            (16, "目眩まし", "thief",   7,  0, "silence",  "enemy",       2),
+            (17, "毒矢",     "archer",  6,  0, "poison",   "enemy",       3),
+            (18, "鎧裂き",   "warrior", 8,  0, "def_down", "enemy",       3),
+        ]
+        for row in status_skills:
+            conn.execute(text(
+                "INSERT OR IGNORE INTO skills "
+                "(id, name, class_type, mp_cost, power, effect_type, target_type, duration) "
+                "VALUES (:id,:name,:ct,:mp,:pw,:et,:tt,:dur)"
+            ), {"id": row[0], "name": row[1], "ct": row[2], "mp": row[3],
+                "pw": row[4], "et": row[5], "tt": row[6], "dur": row[7]})
+        conn.commit()

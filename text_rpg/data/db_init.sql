@@ -34,6 +34,14 @@ INSERT OR IGNORE INTO skills (id, name, class_type, mp_cost, power, effect_type)
   (4, 'チャージ',     'warrior',  5, 20, 'attack'),
   (5, 'ポーション',   'all',      0, 30, 'heal');
 
+-- スキル（状態異常システム）
+INSERT OR IGNORE INTO skills (id, name, class_type, mp_cost, power, effect_type, target_type, duration) VALUES
+  (14, '浄化',   'priest',  5,  0, 'cure',     'ally',        0),
+  (15, '毒霧',   'mage',   10,  0, 'poison',   'all_enemies', 3),
+  (16, '目眩まし', 'thief',   7,  0, 'silence',  'enemy',       2),
+  (17, '毒矢',   'archer',  6,  0, 'poison',   'enemy',       3),
+  (18, '鎧裂き', 'warrior', 8,  0, 'def_down', 'enemy',       3);
+
 -- スキル（追加4クラス）
 INSERT OR IGNORE INTO skills (id, name, class_type, mp_cost, power, effect_type, target_type, duration) VALUES
   -- 騎士: 防御バフ（挑発）・攻撃

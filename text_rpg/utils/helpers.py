@@ -51,9 +51,9 @@ def seed_initial_data(db) -> None:
     ])
     # ボス
     db.add_all([
-        Enemy(name="ゴブリンキング", dungeon_id=1, floor=1, hp=60,  attack=10, defense=5,  exp_reward=50,  is_boss=True),
-        Enemy(name="オークチーフ",   dungeon_id=1, floor=2, hp=90,  attack=15, defense=8,  exp_reward=80,  is_boss=True),
-        Enemy(name="ダークロード",   dungeon_id=1, floor=3, hp=120, attack=20, defense=10, exp_reward=100, is_boss=True),
+        Enemy(name="ゴブリンキング", dungeon_id=1, floor=1, hp=60,  attack=10, defense=5,  exp_reward=50,  is_boss=True,  status_resistance="stun"),
+        Enemy(name="オークチーフ",   dungeon_id=1, floor=2, hp=90,  attack=15, defense=8,  exp_reward=80,  is_boss=True,  status_resistance="stun"),
+        Enemy(name="ダークロード",   dungeon_id=1, floor=3, hp=120, attack=20, defense=10, exp_reward=100, is_boss=True,  status_resistance="stun"),
     ])
     # スキル（既存4クラス）
     db.add_all([
@@ -77,6 +77,14 @@ def seed_initial_data(db) -> None:
         # 吟遊詩人
         Skill(name="鼓舞の歌", class_type="bard", mp_cost=8,  power=3,  effect_type="buff_atk", target_type="all_allies", duration=3),
         Skill(name="癒しの歌", class_type="bard", mp_cost=14, power=55, effect_type="heal",     target_type="ally",       duration=0),
+    ])
+    # スキル（状態異常システム）
+    db.add_all([
+        Skill(name="浄化",   class_type="priest",  mp_cost=5,  power=0, effect_type="cure",     target_type="ally",         duration=0),
+        Skill(name="毒霧",   class_type="mage",    mp_cost=10, power=0, effect_type="poison",   target_type="all_enemies",  duration=3),
+        Skill(name="目眩まし", class_type="thief",   mp_cost=7,  power=0, effect_type="silence",  target_type="enemy",        duration=2),
+        Skill(name="毒矢",   class_type="archer",  mp_cost=6,  power=0, effect_type="poison",   target_type="enemy",        duration=3),
+        Skill(name="鎧裂き", class_type="warrior", mp_cost=8,  power=0, effect_type="def_down", target_type="enemy",        duration=3),
     ])
 
     db.commit()

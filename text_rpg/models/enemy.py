@@ -20,6 +20,8 @@ class Enemy(Base):
     defense: Mapped[int] = mapped_column(nullable=False)
     exp_reward: Mapped[int] = mapped_column(nullable=False)
     is_boss: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # スタンなど状態異常耐性（カンマ区切り。例: "stun" / "stun,silence"）
+    status_resistance: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
 
     # ──────────────────────────────────────────────────────
     @staticmethod
@@ -54,5 +56,6 @@ class Enemy(Base):
             defense=self.defense,
             exp_reward=self.exp_reward,
             is_boss=self.is_boss,
+            status_resistance=self.status_resistance or "",
         )
         return e

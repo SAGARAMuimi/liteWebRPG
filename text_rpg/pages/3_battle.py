@@ -14,10 +14,20 @@ from models.skill import Skill
 from game.battle import BattleEngine
 from utils.auth import check_login, get_current_user_id
 from utils.helpers import hp_bar, class_display_name
-from config import APP_TITLE, DIFFICULTY_PRESETS
+from config import APP_TITLE, DIFFICULTY_PRESETS, STATUS_AILMENTS
 
 st.set_page_config(page_title=f"戦闘 | {APP_TITLE}", page_icon="⚔️", layout="wide")
 check_login()
+
+# 状態異常アイコン表示ヘルパー
+def _buff_tag(b: dict) -> str:
+    if b.get("stat") == "status":
+        kind = b.get("kind", "")
+        info = STATUS_AILMENTS.get(kind, {})
+        return f"{info.get('icon', '❓')}{info.get('label', kind)}({b['turns_left']}T)"
+    arrow = "⬆️" if b.get("amount", 0) > 0 else "⬇️"
+    stat  = "ATK" if b.get("stat") == "attack" else "DEF"
+    return f"{arrow}{stat}({b['turns_left']}T)"
 
 user_id = get_current_user_id()
 
@@ -57,6 +67,8 @@ if "pending_skill_id" not in st.session_state:
     st.session_state["pending_skill_id"] = None
 if "battle_buffs" not in st.session_state:
     st.session_state["battle_buffs"] = {}
+if "battle_hate" not in st.session_state:
+    st.session_state["battle_hate"] = {}
 
 _diff_cfg = DIFFICULTY_PRESETS[st.session_state.get("difficulty", "normal")]
 engine = BattleEngine(
@@ -64,6 +76,7 @@ engine = BattleEngine(
     heal_mult=_diff_cfg["heal_mult"],
     exp_mult=_diff_cfg["exp_mult"],
     buffs=st.session_state["battle_buffs"],
+    hate=st.session_state["battle_hate"],
 )
 engine.turn = st.session_state["battle_turn"]
 engine._defending = st.session_state["defending_chars"]
@@ -102,6 +115,7 @@ if engine.is_all_enemies_dead():
         st.session_state["battle_exp"] = 0
         st.session_state["battle_leveled"] = []
         st.session_state["battle_buffs"] = {}
+        st.session_state["battle_hate"] = {}
         st.switch_page("pages/2_dungeon.py")
     st.stop()
 
@@ -120,6 +134,7 @@ if engine.is_party_wiped():
         st.session_state["defending_chars"] = set()
         st.session_state["show_skill_panel"] = False
         st.session_state["battle_buffs"] = {}
+        st.session_state["battle_hate"] = {}
         st.switch_page("pages/1_character.py")
     st.stop()
 
@@ -138,33 +153,37 @@ for i, enemy in enumerate(enemies):
         _ekey = f"e_{enemy.id}"
         _ebuffs = _buffs.get(_ekey, [])
         if _ebuffs:
-            _tags = "  ".join(
-                f"{'⬆️' if b['amount'] > 0 else '⬇️'}{'ATK' if b['stat'] == 'attack' else 'DEF'}({b['turns_left']}T)"
-                for b in _ebuffs
-            )
-            st.caption(_tags)
+            st.caption("  ".join(_buff_tag(b) for b in _ebuffs))
 
 st.divider()
 
 # ─── パーティステータス ──────────────────────────────────────
 st.subheader("🧑‍🤝‍🧑 パーティ")
+# 挑発中 / ヘイト最大のターゲットIDを特定
+_hate = st.session_state.get("battle_hate", {})
+_alive_p = [c for c in party if c.is_alive()]
+_taunting = [c for c in _alive_p if any(b.get("taunt") for b in _buffs.get(f"c_{c.id}", []))]
+if _taunting:
+    _hate_target_id = max(_taunting, key=lambda c: _hate.get(c.id, 0)).id
+elif _alive_p:
+    _hate_target_id = max(_alive_p, key=lambda c: _hate.get(c.id, 0)).id
+else:
+    _hate_target_id = None
 pcols = st.columns(len(party))
 for i, chara in enumerate(party):
     with pcols[i]:
         alive_mark = "" if chara.is_alive() else " 💀"
         defending_mark = " 🛡️" if chara.id in st.session_state["defending_chars"] else ""
-        st.markdown(f"**{chara.name}{alive_mark}{defending_mark}**")
+        hate_mark = " 🎯" if chara.is_alive() and chara.id == _hate_target_id else ""
+        _ckey = f"c_{chara.id}"
+        _cbuffs = _buffs.get(_ckey, [])
+        stun_mark = " 💫" if any(b.get("kind") == "stun" for b in _cbuffs if b.get("stat") == "status") else ""
+        st.markdown(f"**{chara.name}{alive_mark}{defending_mark}{hate_mark}{stun_mark}**")
         st.caption(class_display_name(chara.class_type))
         st.text(hp_bar(chara.hp, chara.max_hp))
         st.text(f"MP {chara.mp}/{chara.max_mp}")
-        _ckey = f"c_{chara.id}"
-        _cbuffs = _buffs.get(_ckey, [])
         if _cbuffs:
-            _tags = "  ".join(
-                f"{'⬆️' if b['amount'] > 0 else '⬇️'}{'ATK' if b['stat'] == 'attack' else 'DEF'}({b['turns_left']}T)"
-                for b in _cbuffs
-            )
-            st.caption(_tags)
+            st.caption("  ".join(_buff_tag(b) for b in _cbuffs))
 
 st.divider()
 
@@ -304,16 +323,22 @@ if st.session_state.get("show_skill_panel"):
                     "buff_def":  "⬆️DEF",
                     "debuff_atk": "⬇️ATK",
                     "debuff_def": "⬇️DEF",
+                    "poison":   "☠️",
+                    "stun":     "💫",
+                    "silence":  "🤐",
+                    "def_down": "🔓",
+                    "cure":     "✨",
                 }.get(skill.effect_type, "")
-                label = f"{effect_icon} {skill.name}\nMP:{skill.mp_cost} PWR:{skill.power}"
+                label = f"{effect_icon} {skill.name}\nMP:{skill.mp_cost}"
                 if st.button(label, key=f"skill_{skill.id}", disabled=not can_use, use_container_width=True):
                     etype = skill.effect_type
                     if etype == "heal":
                         msg = engine.player_action(attacker, "skill", target=target_heal, skill=skill)
+                    elif etype == "cure":
+                        msg = engine.player_action(attacker, "skill", target=target_heal, skill=skill)
                     elif etype in ("buff_atk", "buff_def", "buff"):
-                        # バフは engine の target_type に従って自動処理（target は attacker を渡す）
                         msg = engine.player_action(attacker, "skill", target=attacker, skill=skill)
-                    elif etype in ("debuff_atk", "debuff_def"):
+                    elif etype in ("debuff_atk", "debuff_def", "poison", "stun", "silence", "def_down"):
                         msg = engine.player_action(attacker, "skill", target=target_enemy, skill=skill)
                     else:
                         msg = engine.player_action(attacker, "skill", target=target_enemy, skill=skill)
