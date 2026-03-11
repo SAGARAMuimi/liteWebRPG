@@ -5,6 +5,8 @@ from models.dungeon import Dungeon, DungeonProgress  # 、2位: dungeons
 from models.character import Character, PartyMember  # 、3位: characters, party_members
 from models.enemy import Enemy        # 、4位: enemies
 from models.skill import Skill        # 、5位: skills
+from models.item import Item          # 、6位: items
+from models.inventory import Inventory  # 、7位: inventories（users + items に依存）
 
 __all__ = [
     "User",
@@ -14,4 +16,6 @@ __all__ = [
     "PartyMember",
     "Enemy",
     "Skill",
+    "Item",
+    "Inventory",
 ]

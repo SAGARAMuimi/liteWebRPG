@@ -77,9 +77,9 @@ APP_TITLE: str = "⚔️ liteWebRPG"
 #   exp_mult       : 獲得経験値への倍率
 #   heal_mult      : スキルによる回復量への倍率
 DIFFICULTY_PRESETS: dict[str, dict] = {
-    "easy":   {"label": "🟢 やさしい",   "enemy_hp_mult": 0.7, "enemy_atk_mult": 0.8, "exp_mult": 1.5, "heal_mult": 1.3},
-    "normal": {"label": "🟡 ふつう",    "enemy_hp_mult": 1.0, "enemy_atk_mult": 1.0, "exp_mult": 1.0, "heal_mult": 1.0},
-    "hard":   {"label": "🔴 むずかしい", "enemy_hp_mult": 1.5, "enemy_atk_mult": 1.2, "exp_mult": 0.8, "heal_mult": 0.8},
+    "easy":   {"label": "🟢 やさしい",   "enemy_hp_mult": 0.7, "enemy_atk_mult": 0.8, "exp_mult": 1.5, "heal_mult": 1.3, "gold_mult": 1.5},
+    "normal": {"label": "🟡 ふつう",    "enemy_hp_mult": 1.0, "enemy_atk_mult": 1.0, "exp_mult": 1.0, "heal_mult": 1.0, "gold_mult": 1.0},
+    "hard":   {"label": "🔴 むずかしい", "enemy_hp_mult": 1.5, "enemy_atk_mult": 1.2, "exp_mult": 0.8, "heal_mult": 0.8, "gold_mult": 0.8},
 }
 
 # ─── 状態異常定義 ────────────────────────────────────────────
@@ -89,3 +89,35 @@ STATUS_AILMENTS: dict[str, dict] = {
     "def_down": {"icon": "🔓",  "label": "防御低下"},
     "silence":  {"icon": "🤐",  "label": "沈黙"},
 }
+
+# ─── イベントマス設定 ─────────────────────────────────────────
+# 通常部屋のイベント種別の重みテーブル（encounter / trap / merchant / shrine / rest）
+# ボス部屋は対象外（常に encounter）
+EVENT_WEIGHTS: dict[int, dict[str, float]] = {
+    # 1F: 遭遇多め・休憩もある程度
+    1: {"encounter": 0.50, "trap": 0.10, "merchant": 0.10, "shrine": 0.15, "rest": 0.15},
+    # 2F: 罠と遭遇増加
+    2: {"encounter": 0.55, "trap": 0.15, "merchant": 0.10, "shrine": 0.10, "rest": 0.10},
+    # 3F: 遭遇最大・罠増加
+    3: {"encounter": 0.60, "trap": 0.20, "merchant": 0.05, "shrine": 0.05, "rest": 0.10},
+}
+
+# 罠ダメージ: パーティ全体に最大HPの(min%, max%)のダメージ
+TRAP_DAMAGE_PCT: tuple[int, int] = (5, 15)
+
+# 休憩回復量: HP/MP を最大値の %回復
+REST_HEAL_PCT: int = 20
+
+# 祈りの祠 回復量: HP/MP を最大値の %回復（休憩より多め）
+SHRINE_HEAL_PCT: int = 30
+
+# 商人の在庫（アイテムID とその定価）
+# id は items テーブルの初期データと対応
+MERCHANT_STOCK: list[dict] = [
+    {"item_id": 1, "price": 50},   # ポーション
+    {"item_id": 2, "price": 150},  # ハイポーション
+    {"item_id": 3, "price": 80},   # エーテル
+    {"item_id": 4, "price": 100},  # 万能薬
+    {"item_id": 5, "price": 200},  # フェニックスの羽
+    {"item_id": 6, "price": 120},  # 活力の薬
+]

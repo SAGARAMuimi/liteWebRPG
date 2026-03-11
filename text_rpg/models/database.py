@@ -39,6 +39,37 @@ def migrate_db() -> None:
     """
     from sqlalchemy import text
     with engine.connect() as conn:
+        # users テーブルに gold カラム追加
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN gold INTEGER NOT NULL DEFAULT 0"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        # enemies テーブルに gold_reward カラム追加
+        try:
+            conn.execute(text("ALTER TABLE enemies ADD COLUMN gold_reward INTEGER NOT NULL DEFAULT 0"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        # 戦闘報酬のゴールド初期値を設定（未設定のもののみ）
+        gold_data = [
+            ("'\u30b9ライム'",    8),
+            ("'コウモリ'",    10),
+            ("'ゴブリン'",    15),
+            ("'オーク'",      20),
+            ("'ドラゴン'",    30),
+            ("'ゴブリンキング'", 40),
+            ("'オークチーフ'",   65),
+            ("'ダークロード'",   100),
+        ]
+        for name, gold in gold_data:
+            conn.execute(text(
+                f"UPDATE enemies SET gold_reward={gold} WHERE name={name} AND gold_reward=0"
+            ))
+        conn.commit()
+
         # skills テーブルへのカラム追加（存在しない場合のみ）
         for ddl in [
             "ALTER TABLE skills ADD COLUMN target_type VARCHAR(16) DEFAULT 'self'",
@@ -92,4 +123,49 @@ def migrate_db() -> None:
                 "VALUES (:id,:name,:ct,:mp,:pw,:et,:tt,:dur)"
             ), {"id": row[0], "name": row[1], "ct": row[2], "mp": row[3],
                 "pw": row[4], "et": row[5], "tt": row[6], "dur": row[7]})
+        conn.commit()
+
+        # items テーブル作成（存在しない場合）
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS items (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        VARCHAR(64)  NOT NULL,
+                description VARCHAR(256) NOT NULL DEFAULT '',
+                effect_type VARCHAR(16)  NOT NULL,
+                power       INTEGER      NOT NULL DEFAULT 0,
+                target_type VARCHAR(16)  NOT NULL DEFAULT 'ally',
+                duration    INTEGER      NOT NULL DEFAULT 0,
+                price       INTEGER      NOT NULL DEFAULT 0
+            )
+        """))
+        conn.commit()
+
+        # inventories テーブル作成（存在しない場合）
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS inventories (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id  INTEGER NOT NULL REFERENCES users(id),
+                item_id  INTEGER NOT NULL REFERENCES items(id),
+                quantity INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(user_id, item_id)
+            )
+        """))
+        conn.commit()
+
+        # アイテム初期データ（INSERT OR IGNORE で冪等）
+        initial_items = [
+            (1, "ポーション",       "HPを30回復する",               "heal_hp",  30, "ally", 0,  50),
+            (2, "ハイポーション",   "HPを80回復する",               "heal_hp",  80, "ally", 0, 150),
+            (3, "エーテル",         "MPを20回復する",               "heal_mp",  20, "ally", 0,  80),
+            (4, "万能薬",           "状態異常を全て回復する",       "cure",      0, "ally", 0, 100),
+            (5, "フェニックスの羽", "戦闘不能を蘇生（HP30%）",     "revive",   30, "ally", 0, 200),
+            (6, "活力の薬",         "ATKを3上昇（3ターン）",       "buff_atk",  3, "self", 3, 120),
+        ]
+        for row in initial_items:
+            conn.execute(text(
+                "INSERT OR IGNORE INTO items "
+                "(id, name, description, effect_type, power, target_type, duration, price) "
+                "VALUES (:id,:nm,:desc,:et,:pw,:tt,:dur,:price)"
+            ), {"id": row[0], "nm": row[1], "desc": row[2], "et": row[3],
+                "pw": row[4], "tt": row[5], "dur": row[6], "price": row[7]})
         conn.commit()

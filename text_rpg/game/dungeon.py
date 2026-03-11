@@ -4,10 +4,34 @@ game/dungeon.py - DungeonManager クラス
 
 from __future__ import annotations
 import random
+from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 from models.dungeon import Dungeon, DungeonProgress
 from models.enemy import Enemy
-from config import ENCOUNTER_RATE, ENCOUNTER_COUNT, ROOMS_PER_FLOOR
+from config import (
+    ENCOUNTER_RATE, ENCOUNTER_COUNT, ROOMS_PER_FLOOR,
+    EVENT_WEIGHTS, TRAP_DAMAGE_PCT, REST_HEAL_PCT, SHRINE_HEAL_PCT,
+    MERCHANT_STOCK,
+)
+
+
+@dataclass
+class EventResult:
+    """
+    イベントマスの処理結果を格納するデータクラス。
+
+    Attributes:
+        event_type : "encounter" / "trap" / "merchant" / "shrine" / "rest" / "nothing"
+        messages   : 戦闘ログ / イベントテキスト
+        enemies    : 戦闘イベントの場合の敵リスト（それ以外は空）
+        need_battle: True なら戦闘画面へ遷移が必要
+        merchant_stock : 商人マスの在庫 [{"item": Item, "price": int}]
+    """
+    event_type: str = "nothing"
+    messages: list[str] = field(default_factory=list)
+    enemies: list = field(default_factory=list)
+    need_battle: bool = False
+    merchant_stock: list[dict] = field(default_factory=list)
 
 
 class DungeonManager:
@@ -33,7 +57,7 @@ class DungeonManager:
         return room >= ROOMS_PER_FLOOR
 
     # ──────────────────────────────────────────────────────
-    # エンカウント制御
+    # エンカウント制御（後方互換 API）
     # ──────────────────────────────────────────────────────
     def check_encounter(self) -> bool:
         rate = ENCOUNTER_RATE.get(self.current_floor, 0.6)
@@ -64,6 +88,159 @@ class DungeonManager:
         return boss
 
     # ──────────────────────────────────────────────────────
+    # イベント解決（メインエントリポイント）
+    # ──────────────────────────────────────────────────────
+    def resolve_event(
+        self,
+        party: list,
+        room: int,
+        hp_mult: float = 1.0,
+        atk_mult: float = 1.0,
+    ) -> EventResult:
+        """
+        部屋に入ったときのイベントを解決する。
+
+        - ボス部屋（room >= ROOMS_PER_FLOOR）は常に encounter。
+        - 通常部屋は EVENT_WEIGHTS の確率テーブルで種別を決定する。
+
+        Returns:
+            EventResult オブジェクト
+        """
+        if self.is_boss_room(room):
+            return self._event_boss(hp_mult, atk_mult)
+
+        floor = self.current_floor
+        weights_map = EVENT_WEIGHTS.get(floor, EVENT_WEIGHTS[1])
+        kinds   = list(weights_map.keys())
+        weights = list(weights_map.values())
+        event_type = random.choices(kinds, weights=weights, k=1)[0]
+
+        if event_type == "encounter":
+            return self._event_encounter(party, hp_mult, atk_mult)
+        elif event_type == "trap":
+            return self._event_trap(party)
+        elif event_type == "merchant":
+            return self._event_merchant()
+        elif event_type == "shrine":
+            return self._event_shrine(party)
+        elif event_type == "rest":
+            return self._event_rest(party)
+        else:
+            return EventResult(event_type="nothing", messages=["静かだ…何も起きなかった。"])
+
+    # ──────────────────────────────────────────────────────
+    # 各イベント実装
+    # ──────────────────────────────────────────────────────
+    def _event_boss(self, hp_mult: float, atk_mult: float) -> EventResult:
+        boss = self.get_boss(hp_mult=hp_mult, atk_mult=atk_mult)
+        if not boss:
+            return EventResult(event_type="nothing", messages=["ボスが見つかりませんでした（データ不備）。"])
+        return EventResult(
+            event_type="encounter",
+            messages=[f"⚠️ {boss.name} が現れた！ボス戦開始！"],
+            enemies=[boss],
+            need_battle=True,
+        )
+
+    def _event_encounter(self, party: list, hp_mult: float, atk_mult: float) -> EventResult:
+        enemies = self.get_random_enemies(hp_mult=hp_mult, atk_mult=atk_mult)
+        if not enemies:
+            return EventResult(event_type="nothing", messages=["静かだ…何も起きなかった。"])
+        names = "、".join(e.name for e in enemies)
+        return EventResult(
+            event_type="encounter",
+            messages=[f"⚔️ {names} が現れた！"],
+            enemies=enemies,
+            need_battle=True,
+        )
+
+    def _event_trap(self, party: list) -> EventResult:
+        """
+        罠マス: パーティ全体にダメージを与える。
+        - 刃罠（75%）: 最大HPの TRAP_DAMAGE_PCT % の物理ダメージ
+        - 毒ガス罠（25%）: 最大HPの半分のダメージ（ダメージは少ないが不快）
+        HP が 1 を下回らないように調整する（罠では死なない）。
+        """
+        min_pct, max_pct = TRAP_DAMAGE_PCT
+        alive = [c for c in party if c.is_alive()]
+        is_poison_gas = random.random() < 0.25
+
+        if is_poison_gas:
+            pct = max(min_pct // 2, 3)
+            messages = ["⚠️ 毒ガス罠を踏んだ！毒の霧が立ち込めた…"]
+        else:
+            pct = random.randint(min_pct, max_pct)
+            messages = ["⚠️ 刃の罠を踏んだ！"]
+
+        for c in alive:
+            dmg = max(1, c.max_hp * pct // 100)
+            dmg = min(dmg, c.hp - 1)  # 即死防止
+            if dmg > 0:
+                c.hp -= dmg
+                messages.append(f"  {c.name} が {dmg} のダメージを受けた！")
+            else:
+                messages.append(f"  {c.name} はギリギリ耐えた！")
+        messages.append(f"（最大HPの {pct}% ダメージ）")
+        return EventResult(
+            event_type="trap",
+            messages=messages,
+            enemies=[],
+            need_battle=False,
+        )
+
+    def _event_rest(self, party: list) -> EventResult:
+        """休憩マス: 全員の HP/MP を最大値の REST_HEAL_PCT % 回復する。"""
+        pct = REST_HEAL_PCT
+        messages = ["🛌 休憩できる場所を見つけた。"]
+        for c in party:
+            if not c.is_alive():
+                continue
+            hp_gain = max(1, c.max_hp * pct // 100)
+            mp_gain = max(0, c.max_mp * pct // 100)
+            healed_hp = c.heal(hp_gain)
+            healed_mp = min(mp_gain, c.max_mp - c.mp)
+            c.mp = min(c.max_mp, c.mp + mp_gain)
+            messages.append(f"  {c.name}  HP +{healed_hp}  MP +{healed_mp}")
+        messages.append(f"（最大HP/MPの {pct}% 回復）")
+        return EventResult(event_type="rest", messages=messages)
+
+    def _event_shrine(self, party: list) -> EventResult:
+        """
+        祈りの祠マス: 全員の HP/MP を最大値の SHRINE_HEAL_PCT % 回復する。
+        さらに低確率（30%）でランダムな一時バフを付与する。
+        """
+        pct = SHRINE_HEAL_PCT
+        messages = ["⛩️ 祈りの祠を発見した。"]
+        for c in party:
+            if not c.is_alive():
+                continue
+            hp_gain = max(1, c.max_hp * pct // 100)
+            mp_gain = max(0, c.max_mp * pct // 100)
+            healed_hp = c.heal(hp_gain)
+            healed_mp = min(mp_gain, c.max_mp - c.mp)
+            c.mp = min(c.max_mp, c.mp + mp_gain)
+            messages.append(f"  {c.name}  HP +{healed_hp}  MP +{healed_mp}")
+        messages.append(f"（最大HP/MPの {pct}% 回復）")
+        return EventResult(event_type="shrine", messages=messages)
+
+    def _event_merchant(self) -> EventResult:
+        """商人マス: 在庫リストを返す。購入処理は呼び出し側（page）で行う。"""
+        from models.item import Item
+        stock: list[dict] = []
+        for entry in MERCHANT_STOCK:
+            item = Item.get_by_id(self.db, entry["item_id"])
+            if item:
+                stock.append({"item": item, "price": entry["price"]})
+        messages = ["🛒 商人に出会った！"]
+        if not stock:
+            messages.append("商品が見当たらない…")
+        return EventResult(
+            event_type="merchant",
+            messages=messages,
+            merchant_stock=stock,
+        )
+
+    # ──────────────────────────────────────────────────────
     # 進行管理
     # ──────────────────────────────────────────────────────
     def advance_to_next_floor(self) -> bool:
@@ -84,3 +261,4 @@ class DungeonManager:
         self.progress.current_floor = 1
         self.progress.is_cleared = False
         self.progress.save(self.db)
+

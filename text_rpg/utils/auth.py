@@ -22,6 +22,8 @@ def init_session_defaults() -> None:
         "difficulty": "normal",
         "battle_buffs": {},
         "battle_hate": {},
+        "battle_inventory": [],
+        "show_item_panel": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -55,11 +57,13 @@ def login_user(db: Session, username: str, password: str) -> bool:
 def register_user(db: Session, username: str, password: str) -> tuple[bool, str]:
     """新規登録処理。(成功フラグ, メッセージ) を返す"""
     from models.user import User
+    from utils.helpers import give_starter_items
     from sqlalchemy.exc import IntegrityError
     try:
         user = User.create(db, username, password)
         st.session_state["user_id"] = user.id
         st.session_state["username"] = user.name
+        give_starter_items(db, user.id)
         return True, "登録しました！"
     except IntegrityError:
         db.rollback()

@@ -37,23 +37,23 @@ def seed_initial_data(db) -> None:
 
     # 敵（1F）
     db.add_all([
-        Enemy(name="スライム",    dungeon_id=1, floor=1, hp=20, attack=5,  defense=2, exp_reward=10,  is_boss=False),
-        Enemy(name="コウモリ",    dungeon_id=1, floor=1, hp=15, attack=7,  defense=1, exp_reward=12,  is_boss=False),
+        Enemy(name="スライム",    dungeon_id=1, floor=1, hp=20, attack=5,  defense=2, exp_reward=10,  gold_reward=8,   is_boss=False),
+        Enemy(name="コウモリ",    dungeon_id=1, floor=1, hp=15, attack=7,  defense=1, exp_reward=12,  gold_reward=10,  is_boss=False),
     ])
     # 敵（2F）
     db.add_all([
-        Enemy(name="ゴブリン",    dungeon_id=1, floor=2, hp=35, attack=10, defense=4, exp_reward=20,  is_boss=False),
-        Enemy(name="オーク",      dungeon_id=1, floor=2, hp=40, attack=12, defense=5, exp_reward=25,  is_boss=False),
+        Enemy(name="ゴブリン",    dungeon_id=1, floor=2, hp=35, attack=10, defense=4, exp_reward=20,  gold_reward=15,  is_boss=False),
+        Enemy(name="オーク",      dungeon_id=1, floor=2, hp=40, attack=12, defense=5, exp_reward=25,  gold_reward=20,  is_boss=False),
     ])
     # 敵（3F 通常）
     db.add_all([
-        Enemy(name="ドラゴン",    dungeon_id=1, floor=3, hp=60, attack=14, defense=6, exp_reward=35,  is_boss=False),
+        Enemy(name="ドラゴン",    dungeon_id=1, floor=3, hp=60, attack=14, defense=6, exp_reward=35,  gold_reward=30,  is_boss=False),
     ])
     # ボス
     db.add_all([
-        Enemy(name="ゴブリンキング", dungeon_id=1, floor=1, hp=60,  attack=10, defense=5,  exp_reward=50,  is_boss=True,  status_resistance="stun"),
-        Enemy(name="オークチーフ",   dungeon_id=1, floor=2, hp=90,  attack=15, defense=8,  exp_reward=80,  is_boss=True,  status_resistance="stun"),
-        Enemy(name="ダークロード",   dungeon_id=1, floor=3, hp=120, attack=20, defense=10, exp_reward=100, is_boss=True,  status_resistance="stun"),
+        Enemy(name="ゴブリンキング", dungeon_id=1, floor=1, hp=60,  attack=10, defense=5,  exp_reward=50,  gold_reward=40,  is_boss=True,  status_resistance="stun"),
+        Enemy(name="オークチーフ",   dungeon_id=1, floor=2, hp=90,  attack=15, defense=8,  exp_reward=80,  gold_reward=65,  is_boss=True,  status_resistance="stun"),
+        Enemy(name="ダークロード",   dungeon_id=1, floor=3, hp=120, attack=20, defense=10, exp_reward=100, gold_reward=100, is_boss=True,  status_resistance="stun"),
     ])
     # スキル（既存4クラス）
     db.add_all([
@@ -87,4 +87,27 @@ def seed_initial_data(db) -> None:
         Skill(name="鎧裂き", class_type="warrior", mp_cost=8,  power=0, effect_type="def_down", target_type="enemy",        duration=3),
     ])
 
+    # アイテムマスタ（6種）
+    from models.item import Item
+    db.add_all([
+        Item(id=1, name="ポーション",       description="HPを30回復する",           effect_type="heal_hp",  power=30, target_type="ally", duration=0, price=50),
+        Item(id=2, name="ハイポーション",   description="HPを80回復する",           effect_type="heal_hp",  power=80, target_type="ally", duration=0, price=150),
+        Item(id=3, name="エーテル",         description="MPを20回復する",           effect_type="heal_mp",  power=20, target_type="ally", duration=0, price=80),
+        Item(id=4, name="万能薬",           description="状態異常を全て回復する",   effect_type="cure",     power=0,  target_type="ally", duration=0, price=100),
+        Item(id=5, name="フェニックスの羽", description="戦闘不能を蘇生（HP30%）",  effect_type="revive",   power=30, target_type="ally", duration=0, price=200),
+        Item(id=6, name="活力の薬",         description="ATKを3上昇（3ターン）",    effect_type="buff_atk", power=3,  target_type="self", duration=3, price=120),
+    ])
+
     db.commit()
+
+
+def give_starter_items(db, user_id: int) -> None:
+    """
+    新規ユーザーにポーション×3を付与する。
+    既にインベントリが存在する場合は付与しない（重複防止）。
+    """
+    from models.inventory import Inventory
+    existing = db.query(Inventory).filter(Inventory.user_id == user_id).first()
+    if existing:
+        return  # 既に付与済み
+    Inventory.add_item(db, user_id, item_id=1, quantity=3)  # ポーション×3

@@ -348,3 +348,91 @@ class TestStatusAilment:
         cure = self._make_status_skill("cure", mp_cost=5, target_type="ally", duration=0)
         self.engine.player_action(self.chara, "skill", target=self.chara, skill=cure)
         assert not self.engine.has_status(self.chara, "poison")
+
+
+# ─── アイテム使用テスト ────────────────────────────────────
+class TestItemUse:
+    """BattleEngine.use_item() のユニットテスト"""
+
+    def setup_method(self):
+        self.chara = make_character(hp=50, mp=20)
+        self.chara.max_hp = 100
+        self.chara.max_mp = 30
+        self.ally = make_character(name="仲間", hp=40, mp=10)
+        self.ally.id = 2
+        self.ally.max_hp = 80
+        self.ally.max_mp = 20
+        self.enemy = make_enemy(hp=30)
+        self.engine = BattleEngine([self.chara, self.ally], [self.enemy])
+
+    @staticmethod
+    def _make_item(name="テストアイテム", effect_type="heal_hp", power=30,
+                   target_type="ally", duration=0):
+        item = MagicMock()
+        item.id = 99
+        item.name = name
+        item.effect_type = effect_type
+        item.power = power
+        item.target_type = target_type
+        item.duration = duration
+        return item
+
+    def test_heal_hp_item(self):
+        """HP回復アイテムを使うと HP が増加する"""
+        item = self._make_item("ポーション", effect_type="heal_hp", power=30)
+        before = self.chara.hp
+        msg = self.engine.use_item(self.chara, item, target=self.chara)
+        assert self.chara.hp > before
+        assert "回復" in msg
+
+    def test_heal_hp_not_exceed_max(self):
+        """HP回復が最大 HP を超えない"""
+        self.chara.hp = 90  # 最大 100
+        item = self._make_item("ポーション", effect_type="heal_hp", power=30)
+        self.engine.use_item(self.chara, item, target=self.chara)
+        assert self.chara.hp <= self.chara.max_hp
+
+    def test_heal_mp_item(self):
+        """MP回復アイテムを使うと MP が増加する"""
+        self.chara.mp = 5
+        item = self._make_item("エーテル", effect_type="heal_mp", power=20)
+        before = self.chara.mp
+        msg = self.engine.use_item(self.chara, item, target=self.chara)
+        assert self.chara.mp > before
+        assert "回復" in msg
+
+    def test_revive_dead_character(self):
+        """蘇生アイテムで HP=0 のキャラが復活する"""
+        self.ally.hp = 0
+        assert not self.ally.is_alive()
+        item = self._make_item("フェニックスの羽", effect_type="revive", power=30)
+        msg = self.engine.use_item(self.chara, item, target=self.ally)
+        assert self.ally.is_alive()
+        assert "蘇生" in msg
+
+    def test_revive_alive_fails(self):
+        """生存キャラに蘇生を使うと失敗メッセージを返す"""
+        assert self.ally.is_alive()
+        item = self._make_item("フェニックスの羽", effect_type="revive", power=30)
+        msg = self.engine.use_item(self.chara, item, target=self.ally)
+        assert "戦闘不能ではない" in msg
+
+    def test_cure_item_removes_status(self):
+        """万能薬で毒が除去される"""
+        self.engine.apply_status(self.chara, "poison", 3, "テスト毒")
+        assert self.engine.has_status(self.chara, "poison")
+        item = self._make_item("万能薬", effect_type="cure", power=0)
+        self.engine.use_item(self.chara, item, target=self.chara)
+        assert not self.engine.has_status(self.chara, "poison")
+
+    def test_buff_atk_item(self):
+        """活力の薬で ATK バフが付与される"""
+        item = self._make_item("活力の薬", effect_type="buff_atk", power=3, duration=3)
+        msg = self.engine.use_item(self.chara, item, target=self.chara)
+        key = self.engine._entity_key(self.chara)
+        buffs = self.engine.buffs.get(key, [])
+        atk_buffs = [b for b in buffs if b["stat"] == "attack"]
+        assert atk_buffs, "ATK バフが付与されていない"
+        assert atk_buffs[0]["amount"] == 3
+        assert "上昇" in msg
+

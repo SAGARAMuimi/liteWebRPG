@@ -11,7 +11,10 @@ import streamlit as st
 from models.database import SessionLocal
 from models.character import PartyMember
 from models.skill import Skill
+from models.item import Item
+from models.inventory import Inventory
 from game.battle import BattleEngine
+from models.user import User
 from utils.auth import check_login, get_current_user_id
 from utils.helpers import hp_bar, class_display_name
 from config import APP_TITLE, DIFFICULTY_PRESETS, STATUS_AILMENTS
@@ -69,6 +72,21 @@ if "battle_buffs" not in st.session_state:
     st.session_state["battle_buffs"] = {}
 if "battle_hate" not in st.session_state:
     st.session_state["battle_hate"] = {}
+if "battle_inventory" not in st.session_state:
+    st.session_state["battle_inventory"] = []
+if "show_item_panel" not in st.session_state:
+    st.session_state["show_item_panel"] = False
+
+# 戦闘開始時にインベントリを DB からロード（battle_enemies が初層に設定されたタイミング）
+if not st.session_state["battle_inventory"] and st.session_state.get("battle_enemies"):
+    with SessionLocal() as db:
+        inv_rows = Inventory.get_by_user(db, user_id)
+        _all_items = {item.id: item for item in Item.get_all(db)}
+    st.session_state["battle_inventory"] = [
+        {"item": _all_items[row.item_id], "quantity": row.quantity}
+        for row in inv_rows
+        if row.item_id in _all_items
+    ]
 
 _diff_cfg = DIFFICULTY_PRESETS[st.session_state.get("difficulty", "normal")]
 engine = BattleEngine(
@@ -88,9 +106,11 @@ st.divider()
 
 # ─── 勝敗チェック ────────────────────────────────────────────
 if engine.is_all_enemies_dead():
-    # EXP付与は初回レンダリング時のみ（ボタンクリックによる再レンダリングで二重付与しない）
+    # EXP/GOLD付与は初回レンダリング時のみ（ボタンクリックによる再レンダリングで二重付与しない）
     if st.session_state.get("battle_result") != "win":
         total_exp = engine.get_total_exp()
+        diff_cfg = DIFFICULTY_PRESETS.get(st.session_state.get("difficulty", "normal"), DIFFICULTY_PRESETS["normal"])
+        total_gold = int(sum(e.gold_reward for e in enemies) * diff_cfg["gold_mult"])
         leveled: list[str] = []
         with SessionLocal() as db:
             for chara in party:
@@ -100,10 +120,15 @@ if engine.is_all_enemies_dead():
                     up = chara.gain_exp(db, total_exp)
                     if up:
                         leveled.append(chara.name)
+            User.add_gold(db, user_id, total_gold)
         st.session_state["battle_result"] = "win"
         st.session_state["battle_exp"] = total_exp
+        st.session_state["battle_gold"] = total_gold
         st.session_state["battle_leveled"] = leveled
-    st.success(f"🎉 勝利！  獲得 EXP: {st.session_state['battle_exp']}")
+    st.success(
+        f"🎉 勝利！  獲得 EXP: {st.session_state['battle_exp']}  "
+        f"💰 獲得 GOLD: {st.session_state.get('battle_gold', 0)} G"
+    )
     if st.session_state.get("battle_leveled"):
         st.info(f"レベルアップ！: {', '.join(st.session_state['battle_leveled'])}")
     # battle_enemies のクリアはボタン内で行う（先にクリアすると再レンダリング時に警告が出る）
@@ -112,7 +137,10 @@ if engine.is_all_enemies_dead():
         st.session_state["battle_turn"] = 1
         st.session_state["defending_chars"] = set()
         st.session_state["show_skill_panel"] = False
+        st.session_state["show_item_panel"] = False
+        st.session_state["battle_inventory"] = []
         st.session_state["battle_exp"] = 0
+        st.session_state["battle_gold"] = 0
         st.session_state["battle_leveled"] = []
         st.session_state["battle_buffs"] = {}
         st.session_state["battle_hate"] = {}
@@ -133,6 +161,8 @@ if engine.is_party_wiped():
         st.session_state["battle_turn"] = 1
         st.session_state["defending_chars"] = set()
         st.session_state["show_skill_panel"] = False
+        st.session_state["show_item_panel"] = False
+        st.session_state["battle_inventory"] = []
         st.session_state["battle_buffs"] = {}
         st.session_state["battle_hate"] = {}
         st.switch_page("pages/1_character.py")
@@ -263,8 +293,23 @@ _is_enemy  = selected_target_idx < _num_enemies
 target_enemy = alive_enemies[selected_target_idx] if _is_enemy else alive_enemies[0]
 target_heal  = alive_party[selected_target_idx - _num_enemies] if not _is_enemy else (alive_party[0] if alive_party else attacker)
 
+# アイテムパネルが開いているとき: 全パーティ（戦闘不能含む）を対象に
+_show_item = st.session_state.get("show_item_panel", False)
+_item_target_pool = party if _show_item else alive_party
+_item_target_labels = _unique_labels(_item_target_pool)
+if _show_item and _item_target_pool:
+    _item_target_sel_idx = st.selectbox(
+        "🎒 アイテム対象を選ぶ",
+        range(len(_item_target_labels)),
+        format_func=lambda i: _item_target_labels[i],
+        key="item_target_select",
+    )
+    item_target = _item_target_pool[_item_target_sel_idx]
+else:
+    item_target = alive_party[0] if alive_party else attacker
+
 # ─── 行動ボタン ───────────────────────────────────────────────
-btn_col1, btn_col2, btn_col3 = st.columns(3)
+btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
 
 def do_enemy_turn():
     msgs = engine.enemy_action()
@@ -284,6 +329,8 @@ with btn_col1:
     if st.button("⚔️ 攻撃", use_container_width=True):
         msg = engine.player_action(attacker, "attack", target=target_enemy)
         st.session_state["battle_log"].append(msg)
+        st.session_state["show_skill_panel"] = False
+        st.session_state["show_item_panel"] = False
         if not engine.is_all_enemies_dead():
             do_enemy_turn()
         st.rerun()
@@ -291,6 +338,7 @@ with btn_col1:
 with btn_col2:
     if st.button("✨ スキル", use_container_width=True):
         st.session_state["show_skill_panel"] = not st.session_state["show_skill_panel"]
+        st.session_state["show_item_panel"] = False
         st.rerun()
 
 with btn_col3:
@@ -298,7 +346,15 @@ with btn_col3:
         msg = engine.player_action(attacker, "defend")
         st.session_state["battle_log"].append(msg)
         st.session_state["defending_chars"] = engine._defending
+        st.session_state["show_skill_panel"] = False
+        st.session_state["show_item_panel"] = False
         do_enemy_turn()
+        st.rerun()
+
+with btn_col4:
+    if st.button("🎒 アイテム", use_container_width=True):
+        st.session_state["show_item_panel"] = not st.session_state["show_item_panel"]
+        st.session_state["show_skill_panel"] = False
         st.rerun()
 
 # ─── スキルパネル ─────────────────────────────────────────────
@@ -349,7 +405,52 @@ if st.session_state.get("show_skill_panel"):
                         do_enemy_turn()
                     st.rerun()
 
-st.divider()
+# ─── アイテムパネル ───────────────────────────────────────────
+if st.session_state.get("show_item_panel"):
+    st.subheader("🎒 アイテム選択")
+    inv = st.session_state.get("battle_inventory", [])
+    if not inv:
+        st.info("アイテムを所持していません。")
+    else:
+        _effect_icons = {
+            "heal_hp":    "💊",
+            "heal_hp_pct": "💊",
+            "heal_mp":    "🔵",
+            "revive":     "🪶",
+            "cure":       "✨",
+            "buff_atk":   "⬆️ATK",
+            "buff_def":   "⬆️DEF",
+        }
+        item_cols = st.columns(min(len(inv), 4))
+        for i, entry in enumerate(inv):
+            item = entry["item"]
+            qty  = entry["quantity"]
+            with item_cols[i % len(item_cols)]:
+                icon = _effect_icons.get(item.effect_type, "🎁")
+                st.markdown(f"**{icon} {item.name}**")
+                st.caption(item.description)
+                st.text(f"残 {qty} 個")
+                if st.button("使用", key=f"item_{item.id}", disabled=(qty <= 0), use_container_width=True):
+                    # DB を更新
+                    with SessionLocal() as db:
+                        ok = Inventory.use_item(db, user_id, item.id)
+                    if ok:
+                        # session_state のキャッシュも -1
+                        entry["quantity"] -= 1
+                        msg = engine.use_item(attacker, item, target=item_target)
+                        st.session_state["battle_log"].append(msg)
+                        st.session_state["show_item_panel"] = False
+                        if not engine.is_all_enemies_dead():
+                            do_enemy_turn()
+                        # DB に HP/MP を保存
+                        with SessionLocal() as db:
+                            for chara in party:
+                                chara.save(db)
+                        st.rerun()
+                    else:
+                        st.warning("アイテムの消費に失敗しました。")
+
+
 
 # ─── 戦闘ログ ────────────────────────────────────────────────
 st.subheader("📜 戦闘ログ")

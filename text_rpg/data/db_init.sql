@@ -56,3 +56,33 @@ INSERT OR IGNORE INTO skills (id, name, class_type, mp_cost, power, effect_type,
   -- 吟遊詩人: 全体バフ・回復
   (12, '鼓舞の歌',    'bard',     8,  3, 'buff_atk', 'all_allies', 3),
   (13, '癒しの歌',    'bard',    14, 55, 'heal',     'ally',       0);
+
+-- items テーブル（DDL）
+CREATE TABLE IF NOT EXISTS items (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        VARCHAR(64)  NOT NULL,
+    description VARCHAR(256) NOT NULL DEFAULT '',
+    effect_type VARCHAR(16)  NOT NULL,
+    power       INTEGER      NOT NULL DEFAULT 0,
+    target_type VARCHAR(16)  NOT NULL DEFAULT 'ally',
+    duration    INTEGER      NOT NULL DEFAULT 0,
+    price       INTEGER      NOT NULL DEFAULT 0
+);
+
+-- inventories テーブル（DDL）
+CREATE TABLE IF NOT EXISTS inventories (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id  INTEGER NOT NULL REFERENCES users(id),
+    item_id  INTEGER NOT NULL REFERENCES items(id),
+    quantity INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(user_id, item_id)
+);
+
+-- アイテム初期データ
+INSERT OR IGNORE INTO items (id, name, description, effect_type, power, target_type, duration, price) VALUES
+  (1, 'ポーション',       'HPを30回復する',               'heal_hp',  30, 'ally', 0,  50),
+  (2, 'ハイポーション',   'HPを80回復する',               'heal_hp',  80, 'ally', 0, 150),
+  (3, 'エーテル',         'MPを20回復する',               'heal_mp',  20, 'ally', 0,  80),
+  (4, '万能薬',           '状態異常を全て回復する',       'cure',      0, 'ally', 0, 100),
+  (5, 'フェニックスの羽', '戦闘不能を蘇生（HP30%）',     'revive',   30, 'ally', 0, 200),
+  (6, '活力の薬',         'ATKを3上昇（3ターン）',       'buff_atk',  3, 'self', 3, 120);

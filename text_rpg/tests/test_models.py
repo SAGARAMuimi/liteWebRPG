@@ -116,3 +116,59 @@ class TestEnemyModel:
         e.hp = 20
         actual = e.take_damage(0)
         assert actual == 1
+
+
+class TestUserGold:
+    def test_initial_gold_is_zero(self, db):
+        user = User.create(db, "golduser1", "pass")
+        assert user.gold == 0
+
+    def test_add_gold(self, db):
+        user = User.create(db, "golduser2", "pass")
+        new_total = User.add_gold(db, user.id, 100)
+        assert new_total == 100
+        assert User.get_gold(db, user.id) == 100
+
+    def test_add_gold_multiple_times(self, db):
+        user = User.create(db, "golduser3", "pass")
+        User.add_gold(db, user.id, 50)
+        User.add_gold(db, user.id, 30)
+        assert User.get_gold(db, user.id) == 80
+
+    def test_spend_gold_success(self, db):
+        user = User.create(db, "golduser4", "pass")
+        User.add_gold(db, user.id, 200)
+        ok = User.spend_gold(db, user.id, 150)
+        assert ok is True
+        assert User.get_gold(db, user.id) == 50
+
+    def test_spend_gold_insufficient(self, db):
+        user = User.create(db, "golduser5", "pass")
+        User.add_gold(db, user.id, 100)
+        ok = User.spend_gold(db, user.id, 200)
+        assert ok is False
+        assert User.get_gold(db, user.id) == 100  # 変化なし
+
+    def test_spend_gold_exact_amount(self, db):
+        user = User.create(db, "golduser6", "pass")
+        User.add_gold(db, user.id, 50)
+        ok = User.spend_gold(db, user.id, 50)
+        assert ok is True
+        assert User.get_gold(db, user.id) == 0
+
+
+class TestEnemyGoldReward:
+    def test_gold_reward_default_zero(self):
+        e = Enemy()
+        e.gold_reward = 0
+        assert e.gold_reward == 0
+
+    def test_clone_preserves_gold_reward(self):
+        e = Enemy(
+            id=1, name="スライム", dungeon_id=1, floor=1,
+            hp=20, attack=5, defense=2,
+            exp_reward=10, gold_reward=8,
+            is_boss=False, status_resistance="",
+        )
+        cloned = e.clone()
+        assert cloned.gold_reward == 8

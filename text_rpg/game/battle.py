@@ -386,6 +386,68 @@ class BattleEngine:
         return messages
 
     # ──────────────────────────────────────────────────────
+    # アイテム使用
+    # ──────────────────────────────────────────────────────
+    def use_item(
+        self,
+        character: "Character",
+        item,
+        target: "Character | None" = None,
+    ) -> str:
+        """
+        アイテムを使用する。
+        - target が None の場合は character 自身に適用（target_type='self' または未指定時）。
+        - revive は target が生存中の場合は失敗メッセージを返す。
+        - スタン中でも使用可能（スキルと異なりアイテムはブロックしない）。
+        - ヘイトは固定 +5 加算。
+        """
+        etype = item.effect_type
+        actual_target = target if target is not None else character
+
+        if etype == "heal_hp":
+            healed = actual_target.heal(item.power)
+            self.add_hate(character, 5)
+            return f"{character.name} は {item.name} を使った！ {actual_target.name} の HP が {healed} 回復！"
+
+        elif etype == "heal_hp_pct":
+            amount = max(1, actual_target.max_hp * item.power // 100)
+            healed = actual_target.heal(amount)
+            self.add_hate(character, 5)
+            return f"{character.name} は {item.name} を使った！ {actual_target.name} の HP が {healed} 回復！"
+
+        elif etype == "heal_mp":
+            restored = min(item.power, actual_target.max_mp - actual_target.mp)
+            actual_target.mp = min(actual_target.max_mp, actual_target.mp + item.power)
+            self.add_hate(character, 5)
+            return f"{character.name} は {item.name} を使った！ {actual_target.name} の MP が {restored} 回復！"
+
+        elif etype == "revive":
+            if actual_target.is_alive():
+                return f"{actual_target.name} は戦闘不能ではない！"
+            hp = max(1, actual_target.max_hp * item.power // 100)
+            actual_target.hp = hp
+            self.add_hate(character, 5)
+            return f"{character.name} は {item.name} を使った！ {actual_target.name} が蘇生！（HP {hp}）"
+
+        elif etype == "cure":
+            c_key = self._entity_key(actual_target)
+            if c_key in self.buffs:
+                self.buffs[c_key] = [b for b in self.buffs[c_key] if b.get("stat") != "status"]
+                if not self.buffs[c_key]:
+                    del self.buffs[c_key]
+            self.add_hate(character, 5)
+            return f"{character.name} は {item.name} を使った！ {actual_target.name} の状態異常が回復！"
+
+        elif etype in ("buff_atk", "buff_def"):
+            stat = "attack" if etype == "buff_atk" else "defense"
+            duration = item.duration or 3
+            msg = self.apply_buff(actual_target, stat, item.power, duration, item.name)
+            self.add_hate(character, 5)
+            return f"{character.name} は {item.name} を使った！ {msg}"
+
+        return f"{item.name}（効果なし）"
+
+    # ──────────────────────────────────────────────────────
     # 勝敗判定
     # ──────────────────────────────────────────────────────
     def is_party_wiped(self) -> bool:

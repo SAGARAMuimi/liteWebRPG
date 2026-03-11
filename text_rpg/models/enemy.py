@@ -19,6 +19,7 @@ class Enemy(Base):
     attack: Mapped[int] = mapped_column(nullable=False)
     defense: Mapped[int] = mapped_column(nullable=False)
     exp_reward: Mapped[int] = mapped_column(nullable=False)
+    gold_reward: Mapped[int] = mapped_column(nullable=False, server_default="0", default=0)
     is_boss: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # スタンなど状態異常耐性（カンマ区切り。例: "stun" / "stun,silence"）
     status_resistance: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
@@ -55,6 +56,7 @@ class Enemy(Base):
             attack=self.attack,
             defense=self.defense,
             exp_reward=self.exp_reward,
+            gold_reward=self.gold_reward,
             is_boss=self.is_boss,
             status_resistance=self.status_resistance or "",
         )
