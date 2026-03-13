@@ -19,17 +19,19 @@ from models.database import Base
 class Equipment(Base):
     __tablename__ = "equipments"
 
-    id             : Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    name           : Mapped[str] = mapped_column(String(64),  nullable=False)
-    description    : Mapped[str] = mapped_column(String(256), nullable=False, server_default="")
-    slot           : Mapped[str] = mapped_column(String(16),  nullable=False)  # weapon / armor / accessory
-    atk_bonus      : Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
-    def_bonus      : Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
-    hp_bonus       : Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
-    mp_bonus       : Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
-    price          : Mapped[int] = mapped_column(nullable=False, default=0,  server_default="0")
-    required_class : Mapped[str] = mapped_column(String(128), nullable=False, server_default="")
+    id             : Mapped[int]  = mapped_column(primary_key=True, autoincrement=True)
+    name           : Mapped[str]  = mapped_column(String(64),  nullable=False)
+    description    : Mapped[str]  = mapped_column(String(256), nullable=False, server_default="")
+    slot           : Mapped[str]  = mapped_column(String(16),  nullable=False)  # weapon / armor / accessory
+    atk_bonus      : Mapped[int]  = mapped_column(nullable=False, default=0, server_default="0")
+    def_bonus      : Mapped[int]  = mapped_column(nullable=False, default=0, server_default="0")
+    hp_bonus       : Mapped[int]  = mapped_column(nullable=False, default=0, server_default="0")
+    mp_bonus       : Mapped[int]  = mapped_column(nullable=False, default=0, server_default="0")
+    price          : Mapped[int]  = mapped_column(nullable=False, default=0,  server_default="0")
+    required_class : Mapped[str]  = mapped_column(String(128), nullable=False, server_default="")
+    disposable     : Mapped[bool] = mapped_column(nullable=False, default=False, server_default="0")
     # required_class: カンマ区切りの class_type。空 = 全クラス装備可
+    # disposable: True = 外すと消える消耗品装備 / False = 外すとキャラインベントリに戻る
 
     # ──────────────────────────────────────────────────────
     @staticmethod
@@ -54,7 +56,10 @@ class Equipment(Base):
         if self.def_bonus: parts.append(f"DEF+{self.def_bonus}")
         if self.hp_bonus:  parts.append(f"HP+{self.hp_bonus}")
         if self.mp_bonus:  parts.append(f"MP+{self.mp_bonus}")
-        return " / ".join(parts) if parts else "—"
+        summary = " / ".join(parts) if parts else "—"
+        if self.disposable:
+            summary += "  🔥消耗品"
+        return summary
 
 
 class CharacterEquipment(Base):
@@ -87,3 +92,74 @@ class CharacterEquipment(Base):
             )
             .first()
         )
+
+
+class CharacterInventory(Base):
+    """
+    キャラクターの装備インベントリ。
+    装備を外した（disposable=False）際の戻り先テーブル。
+    同一キャラ・同一装備IDで quantity を積み上げる。
+    """
+    __tablename__ = "character_inventories"
+
+    id           : Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    character_id : Mapped[int] = mapped_column(ForeignKey("characters.id"), nullable=False)
+    equipment_id : Mapped[int] = mapped_column(ForeignKey("equipments.id"), nullable=False)
+    quantity     : Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
+
+    __table_args__ = (UniqueConstraint("character_id", "equipment_id"),)
+
+    # ──────────────────────────────────────────────────────
+    @staticmethod
+    def get_for_character(db: Session, character_id: int) -> list["CharacterInventory"]:
+        """キャラクターのインベントリ一覧を数量降順で返す"""
+        return (
+            db.query(CharacterInventory)
+            .filter(CharacterInventory.character_id == character_id)
+            .order_by(CharacterInventory.equipment_id)
+            .all()
+        )
+
+    @staticmethod
+    def add(db: Session, character_id: int, equipment_id: int, qty: int = 1) -> None:
+        """インベントリに装備を追加（既存なら quantity を加算）"""
+        row = (
+            db.query(CharacterInventory)
+            .filter(
+                CharacterInventory.character_id == character_id,
+                CharacterInventory.equipment_id == equipment_id,
+            )
+            .first()
+        )
+        if row:
+            row.quantity += qty
+        else:
+            db.add(CharacterInventory(
+                character_id=character_id,
+                equipment_id=equipment_id,
+                quantity=qty,
+            ))
+        db.commit()
+
+    @staticmethod
+    def consume(db: Session, character_id: int, equipment_id: int, qty: int = 1) -> bool:
+        """
+        インベントリから装備を1個消費する。
+        quantity が 0 以下になればレコードを削除。
+        Returns: 成功したか
+        """
+        row = (
+            db.query(CharacterInventory)
+            .filter(
+                CharacterInventory.character_id == character_id,
+                CharacterInventory.equipment_id == equipment_id,
+            )
+            .first()
+        )
+        if not row or row.quantity < qty:
+            return False
+        row.quantity -= qty
+        if row.quantity <= 0:
+            db.delete(row)
+        db.commit()
+        return True

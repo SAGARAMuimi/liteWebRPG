@@ -184,10 +184,20 @@ def migrate_db() -> None:
                 hp_bonus        INTEGER      NOT NULL DEFAULT 0,
                 mp_bonus        INTEGER      NOT NULL DEFAULT 0,
                 price           INTEGER      NOT NULL DEFAULT 0,
-                required_class  VARCHAR(128) NOT NULL DEFAULT ''
+                required_class  VARCHAR(128) NOT NULL DEFAULT '',
+                disposable      INTEGER      NOT NULL DEFAULT 0
             )
         """))
         conn.commit()
+
+        # equipments テーブルに disposable カラム追加（既存 DB 対応）
+        try:
+            conn.execute(text(
+                "ALTER TABLE equipments ADD COLUMN disposable INTEGER NOT NULL DEFAULT 0"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
         # character_equipments テーブル作成（存在しない場合）
         conn.execute(text("""
@@ -197,6 +207,18 @@ def migrate_db() -> None:
                 equipment_id    INTEGER NOT NULL REFERENCES equipments(id),
                 slot            VARCHAR(16) NOT NULL,
                 UNIQUE(character_id, slot)
+            )
+        """))
+        conn.commit()
+
+        # character_inventories テーブル作成（存在しない場合）
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS character_inventories (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                character_id    INTEGER NOT NULL REFERENCES characters(id),
+                equipment_id    INTEGER NOT NULL REFERENCES equipments(id),
+                quantity        INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(character_id, equipment_id)
             )
         """))
         conn.commit()

@@ -177,12 +177,13 @@ class TestEnemyGoldReward:
 # ─── 装備システムテスト ────────────────────────────────────
 class TestEquipmentModel:
     def _make_equip(self, db, eid, name="テスト剣", slot="weapon",
-                    atk=5, def_=0, hp=0, mp=0, price=100, req=""):
+                    atk=5, def_=0, hp=0, mp=0, price=100, req="", disposable=False):
         from models.equipment import Equipment
         eq = Equipment(id=eid, name=name, description="", slot=slot,
                        atk_bonus=atk, def_bonus=def_,
                        hp_bonus=hp, mp_bonus=mp,
-                       price=price, required_class=req)
+                       price=price, required_class=req,
+                       disposable=disposable)
         db.add(eq)
         db.commit()
         db.refresh(eq)
@@ -243,7 +244,7 @@ class TestEquipmentModel:
         from models.equipment import Equipment
         eq = Equipment(id=999, name="鋼の剣", description="", slot="weapon",
                        atk_bonus=6, def_bonus=0, hp_bonus=0, mp_bonus=0,
-                       price=280, required_class="warrior,knight")
+                       price=280, required_class="warrior,knight", disposable=False)
         assert eq.can_equip("warrior") is True
         assert eq.can_equip("mage")    is False
         assert eq.can_equip("knight")  is True
@@ -252,7 +253,7 @@ class TestEquipmentModel:
         from models.equipment import Equipment
         eq = Equipment(id=998, name="銅の剣", description="", slot="weapon",
                        atk_bonus=3, def_bonus=0, hp_bonus=0, mp_bonus=0,
-                       price=100, required_class="")
+                       price=100, required_class="", disposable=False)
         for cls in ["warrior", "mage", "thief", "priest",
                     "knight", "archer", "monk", "bard"]:
             assert eq.can_equip(cls) is True
@@ -261,8 +262,84 @@ class TestEquipmentModel:
         from models.equipment import Equipment
         eq = Equipment(id=997, name="テスト装備", description="", slot="armor",
                        atk_bonus=0, def_bonus=3, hp_bonus=10, mp_bonus=0,
-                       price=120, required_class="")
+                       price=120, required_class="", disposable=False)
         summary = eq.bonus_summary()
         assert "DEF+3"  in summary
         assert "HP+10"  in summary
         assert "ATK"    not in summary  # ATK ボーナスなし
+
+    def test_bonus_summary_disposable_label(self):
+        """disposable=True の場合、bonus_summary に 🔥消耗品 が含まれること"""
+        from models.equipment import Equipment
+        eq = Equipment(id=996, name="消耗品剣", description="", slot="weapon",
+                       atk_bonus=4, def_bonus=0, hp_bonus=0, mp_bonus=0,
+                       price=80, required_class="", disposable=True)
+        summary = eq.bonus_summary()
+        assert "消耗品" in summary
+
+    def test_unequip_disposable_no_inventory(self, db):
+        """disposable=True の装備を外すと、インベントリに戻らない"""
+        from models.equipment import Equipment as Eq, CharacterInventory as CI
+        user  = User.create(db, "dispuser1", "pass")
+        chara = Character.create(db, user.id, "消耗テスト1", "warrior")
+        eq = Eq(id=200, name="消耗品剣", description="", slot="weapon",
+                atk_bonus=5, def_bonus=0, hp_bonus=0, mp_bonus=0,
+                price=80, required_class="", disposable=True)
+        db.add(eq); db.commit(); db.refresh(eq)
+        chara.equip(db, eq)
+        chara.unequip(db, "weapon")
+        rows = CI.get_for_character(db, chara.id)
+        assert len(rows) == 0  # インベントリに何も残らない
+
+    def test_unequip_permanent_returns_to_inventory(self, db):
+        """disposable=False の装備を外すと、インベントリに1個戻る"""
+        from models.equipment import Equipment as Eq, CharacterInventory as CI
+        user  = User.create(db, "permuser1", "pass")
+        chara = Character.create(db, user.id, "永続テスト1", "warrior")
+        eq = Eq(id=201, name="永続剣", description="", slot="weapon",
+                atk_bonus=5, def_bonus=0, hp_bonus=0, mp_bonus=0,
+                price=100, required_class="", disposable=False)
+        db.add(eq); db.commit(); db.refresh(eq)
+        chara.equip(db, eq)
+        chara.unequip(db, "weapon")
+        rows = CI.get_for_character(db, chara.id)
+        assert len(rows) == 1
+        assert rows[0].equipment_id == eq.id
+        assert rows[0].quantity == 1
+
+    def test_unequip_permanent_stacks_in_inventory(self, db):
+        """同じ永続装備を2回外すと quantity が 2 になること"""
+        from models.equipment import Equipment as Eq, CharacterInventory as CI
+        user  = User.create(db, "stackuser1", "pass")
+        chara = Character.create(db, user.id, "スタックテスト", "warrior")
+        eq = Eq(id=202, name="量産型剣", description="", slot="weapon",
+                atk_bonus=3, def_bonus=0, hp_bonus=0, mp_bonus=0,
+                price=100, required_class="", disposable=False)
+        db.add(eq); db.commit(); db.refresh(eq)
+        # 1回目：装備→外す
+        chara.equip(db, eq)
+        chara.unequip(db, "weapon")
+        # 2回目：再装備→外す
+        chara.equip(db, eq)
+        chara.unequip(db, "weapon")
+        rows = CI.get_for_character(db, chara.id)
+        assert rows[0].quantity == 2
+
+    def test_character_inventory_consume(self, db):
+        """CharacterInventory.consume で quantity が減り、0以下になれば削除される"""
+        from models.equipment import Equipment as Eq, CharacterInventory as CI
+        user  = User.create(db, "conuser1", "pass")
+        chara = Character.create(db, user.id, "消費テスト", "warrior")
+        eq = Eq(id=203, name="消費剣", description="", slot="weapon",
+                atk_bonus=3, def_bonus=0, hp_bonus=0, mp_bonus=0,
+                price=100, required_class="", disposable=False)
+        db.add(eq); db.commit(); db.refresh(eq)
+        CI.add(db, chara.id, eq.id, qty=2)
+        ok = CI.consume(db, chara.id, eq.id, qty=1)
+        assert ok is True
+        rows = CI.get_for_character(db, chara.id)
+        assert rows[0].quantity == 1
+        # もう1回消費 → レコード削除
+        CI.consume(db, chara.id, eq.id, qty=1)
+        rows = CI.get_for_character(db, chara.id)
+        assert len(rows) == 0

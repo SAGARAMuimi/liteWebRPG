@@ -138,10 +138,11 @@ class Character(Base):
     def unequip(self, db: Session, slot: str) -> str:
         """
         指定スロットの装備を外す。
-        ステータスボーナスをキャラクターの基礎値から減算して DB 保存する。
+        - disposable=True  : 装備は消滅する（消耗品）
+        - disposable=False : キャラクターインベントリに戻る
         Returns: 処理メッセージ
         """
-        from models.equipment import Equipment as Eq, CharacterEquipment as CE
+        from models.equipment import Equipment as Eq, CharacterEquipment as CE, CharacterInventory as CI
         from config import EQUIPMENT_SLOT_NAMES
 
         existing_ce = CE.get_by_slot(db, self.id, slot)
@@ -165,7 +166,13 @@ class Character(Base):
         db.commit()
         for attr in ("attack", "defense", "max_hp", "max_mp", "hp", "mp"):
             setattr(self, attr, getattr(merged, attr))
-        return f"{self.name} が {equip_name} を外した。"
+
+        # disposable=False ならインベントリに戻す
+        if equip and not equip.disposable:
+            CI.add(db, self.id, equip.id, qty=1)
+            return f"{self.name} が {equip_name} を外した。（インベントリに戻りました）"
+
+        return f"{self.name} が {equip_name} を外した。（消耗品のため消滅）"
 
 
 class PartyMember(Base):

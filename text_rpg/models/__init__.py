@@ -7,7 +7,7 @@ from models.enemy import Enemy        # 、4位: enemies
 from models.skill import Skill        # 、5位: skills
 from models.item import Item          # 、6位: items
 from models.inventory import Inventory  # 、7位: inventories（users + items に依存）
-from models.equipment import Equipment, CharacterEquipment  # 、8位: equipments / character_equipments
+from models.equipment import Equipment, CharacterEquipment, CharacterInventory  # 、8位: equipments / character_equipments / character_inventories
 
 __all__ = [
     "User",
@@ -21,4 +21,5 @@ __all__ = [
     "Inventory",
     "Equipment",
     "CharacterEquipment",
+    "CharacterInventory",
 ]

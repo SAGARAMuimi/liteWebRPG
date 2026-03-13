@@ -23,7 +23,7 @@ from config import (
     TOWN_ITEM_MAX_STACK,
     EQUIPMENT_SLOT_NAMES,
 )
-from models.equipment import Equipment, CharacterEquipment
+from models.equipment import Equipment, CharacterEquipment, CharacterInventory
 
 st.set_page_config(page_title=f"町 | {APP_TITLE}", page_icon="🏘️", layout="wide")
 check_login()
@@ -184,6 +184,10 @@ with tab_equip:
         for chara in party:
             slots = CharacterEquipment.get_for_character(db, chara.id)
             equip_map[chara.id] = {ce.slot: ce for ce in slots}
+        # 各キャラのインベントリ {char_id: list[CharacterInventory]}
+        inv_map: dict[int, list] = {}
+        for chara in party:
+            inv_map[chara.id] = CharacterInventory.get_for_character(db, chara.id)
 
     # ── 現在の装備 ──────────────────────────────────────────────
     st.markdown("#### 📦 現在の装備")
@@ -214,6 +218,65 @@ with tab_equip:
                             st.rerun()
                     else:
                         st.caption("— 装備なし —")
+
+    st.divider()
+
+    # ── 所持装備（インベントリ）──────────────────────────────────
+    st.markdown("#### 🎒 所持している装備")
+    st.caption("スロットから外した永続装備がここに保管されます。装備ボタンで再装備できます。")
+
+    any_inv = any(inv_map.get(chara.id) for chara in party)
+    if not any_inv:
+        st.info("所持している装備はありません。")
+    else:
+        for chara in party:
+            inv_rows_chara = inv_map.get(chara.id, [])
+            if not inv_rows_chara:
+                continue
+            with st.expander(
+                f"{chara.name}（{class_display_name(chara.class_type)}）の所持装備",
+                expanded=True,
+            ):
+                inv_cols = st.columns(3)
+                for idx, ci in enumerate(inv_rows_chara):
+                    eq = equip_obj_map.get(ci.equipment_id)
+                    if not eq:
+                        continue
+                    with inv_cols[idx % 3]:
+                        st.text(f"{eq.name} × {ci.quantity}")
+                        st.caption(eq.bonus_summary())
+                        # 装備ボタン
+                        if st.button("装備する", key=f"inv_equip_{chara.id}_{eq.id}",
+                                     use_container_width=True):
+                            with SessionLocal() as db:
+                                # インベントリから1個消費
+                                ok = CharacterInventory.consume(db, chara.id, eq.id, qty=1)
+                            if ok:
+                                with SessionLocal() as db:
+                                    fresh_eq = Equipment.get_by_id(db, eq.id)
+                                    fresh_ch = db.merge(chara)
+                                    msg = fresh_ch.equip(db, fresh_eq)
+                                    for attr in ("attack", "defense", "max_hp",
+                                                 "max_mp", "hp", "mp"):
+                                        setattr(chara, attr, getattr(fresh_ch, attr))
+                                st.session_state["party"] = party
+                                st.success(f"✅ {msg}")
+                                st.rerun()
+                            else:
+                                st.error("装備できませんでした。")
+                        # 売却ボタン（売値は定価の TOWN_SELL_RATE 倍）
+                        sell_price = max(1, int(eq.price * TOWN_SELL_RATE))
+                        if st.button(f"売却 ({sell_price}G)", key=f"inv_sell_{chara.id}_{eq.id}",
+                                     use_container_width=True):
+                            with SessionLocal() as db:
+                                ok = CharacterInventory.consume(db, chara.id, eq.id, qty=1)
+                            if ok:
+                                with SessionLocal() as db:
+                                    User.add_gold(db, user_id, sell_price)
+                                st.success(f"✅ {eq.name} を {sell_price} G で売却しました！")
+                                st.rerun()
+                            else:
+                                st.error("売却できませんでした。")
 
     st.divider()
 
