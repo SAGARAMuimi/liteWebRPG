@@ -95,12 +95,31 @@ STATUS_AILMENTS: dict[str, dict] = {
 # ボス部屋は対象外（常に encounter）
 EVENT_WEIGHTS: dict[int, dict[str, float]] = {
     # 1F: 遭遇多め・休憩もある程度
-    1: {"encounter": 0.50, "trap": 0.10, "merchant": 0.10, "shrine": 0.15, "rest": 0.15},
+    1: {"encounter": 0.42, "trap": 0.10, "merchant": 0.10, "shrine": 0.15, "rest": 0.15, "chest": 0.08},
     # 2F: 罠と遭遇増加
-    2: {"encounter": 0.55, "trap": 0.15, "merchant": 0.10, "shrine": 0.10, "rest": 0.10},
-    # 3F: 遭遇最大・罠増加
-    3: {"encounter": 0.60, "trap": 0.20, "merchant": 0.05, "shrine": 0.05, "rest": 0.10},
+    2: {"encounter": 0.47, "trap": 0.15, "merchant": 0.10, "shrine": 0.10, "rest": 0.10, "chest": 0.08},
+    # 3F: 遭遇最大・罠増加（休憩/祠が減る代わりに宝箱多め）
+    3: {"encounter": 0.52, "trap": 0.20, "merchant": 0.05, "shrine": 0.05, "rest": 0.08, "chest": 0.10},
 }
+
+# 宝箱ゴールド報酬範囲（フロア別 min, max）
+CHEST_GOLD_RANGE: dict[int, tuple[int, int]] = {
+    1: (20,  60),
+    2: (40, 100),
+    3: (60, 150),
+}
+
+# 宝箱パターン（パターン名, 重み）
+CHEST_PATTERNS: list[tuple[str, float]] = [
+    ("gold",      0.35),  # ゴールドのみ
+    ("item",      0.25),  # アイテムのみ
+    ("gold_item", 0.20),  # ゴールド＋アイテム
+    ("mimic",     0.10),  # ミミック（戦闘）
+    ("empty",     0.10),  # 空（ハズレ）
+]
+
+# 宝箱から出るアイテムID（フェニックスの羽=5 は除く）
+CHEST_ITEM_IDS: list[int] = [1, 2, 3, 4, 6]
 
 # 罠ダメージ: パーティ全体に最大HPの(min%, max%)のダメージ
 TRAP_DAMAGE_PCT: tuple[int, int] = (5, 15)

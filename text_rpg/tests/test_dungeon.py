@@ -225,3 +225,90 @@ class TestEventSystem:
         non_enc = sum(v for k, v in counter.items() if k != "encounter")
         assert non_enc > 0, "encounter 以外のイベントが出現しなかった"
 
+    def test_chest_gold_pattern(self, manager):
+        """chest gold パターンは chest_gold > 0、chest_item_id == 0 を返す"""
+        party = [make_party_char()]
+        _call = [0]
+        def _side(*args, **kwargs):
+            _call[0] += 1
+            return ["chest"] if _call[0] == 1 else ["gold"]
+        with patch("random.choices", side_effect=_side):
+            result = manager.resolve_event(party, room=1)
+        assert result.event_type == "chest"
+        assert result.chest_gold > 0
+        assert result.chest_item_id == 0
+        assert result.need_battle is False
+
+    def test_chest_gold_within_range(self, manager):
+        """chest gold パターンのゴールドが CHEST_GOLD_RANGE の範囲内に収まる"""
+        from config import CHEST_GOLD_RANGE
+        party = [make_party_char()]
+        min_g, max_g = CHEST_GOLD_RANGE.get(1, (20, 60))
+        _calls = [0]
+        def _side(*args, **kwargs):
+            _calls[0] += 1
+            return ["chest"] if _calls[0] % 2 == 1 else ["gold"]
+        with patch("random.choices", side_effect=_side):
+            for _ in range(20):
+                result = manager.resolve_event(party, room=1)
+                assert min_g <= result.chest_gold <= max_g
+
+    def test_chest_item_pattern(self, manager):
+        """chest item パターンは chest_item_id > 0、chest_gold == 0 を返す"""
+        party = [make_party_char()]
+        _call = [0]
+        def _side(*args, **kwargs):
+            _call[0] += 1
+            return ["chest"] if _call[0] == 1 else ["item"]
+        with patch("random.choices", side_effect=_side):
+            result = manager.resolve_event(party, room=1)
+        assert result.event_type == "chest"
+        assert result.chest_item_id > 0
+        assert result.chest_gold == 0
+        assert result.need_battle is False
+
+    def test_chest_gold_item_pattern(self, manager):
+        """chest gold_item パターンは chest_gold > 0 かつ chest_item_id > 0 を返す"""
+        party = [make_party_char()]
+        _call = [0]
+        def _side(*args, **kwargs):
+            _call[0] += 1
+            return ["chest"] if _call[0] == 1 else ["gold_item"]
+        with patch("random.choices", side_effect=_side):
+            result = manager.resolve_event(party, room=1)
+        assert result.event_type == "chest"
+        assert result.chest_gold > 0
+        assert result.chest_item_id > 0
+        assert result.need_battle is False
+
+    def test_chest_empty_pattern(self, manager):
+        """chest empty パターンは gold も item も返さない"""
+        party = [make_party_char()]
+        _call = [0]
+        def _side(*args, **kwargs):
+            _call[0] += 1
+            return ["chest"] if _call[0] == 1 else ["empty"]
+        with patch("random.choices", side_effect=_side):
+            result = manager.resolve_event(party, room=1)
+        assert result.event_type == "chest"
+        assert result.chest_gold == 0
+        assert result.chest_item_id == 0
+        assert result.need_battle is False
+        assert any("空" in m for m in result.messages)
+
+    def test_chest_mimic_starts_battle(self, manager):
+        """chest mimic パターンは need_battle=True でミミックを返す"""
+        party = [make_party_char()]
+        _call = [0]
+        def _side(*args, **kwargs):
+            _call[0] += 1
+            return ["chest"] if _call[0] == 1 else ["mimic"]
+        with patch("random.choices", side_effect=_side):
+            result = manager.resolve_event(party, room=1)
+        assert result.event_type == "chest"
+        assert result.need_battle is True
+        assert len(result.enemies) == 1
+        assert result.enemies[0].name == "ミミック"
+        assert result.chest_gold == 0
+        assert result.chest_item_id == 0
+

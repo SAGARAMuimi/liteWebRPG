@@ -190,6 +190,13 @@ with col1:
                 for chara in party:
                     chara.save(db)
 
+            elif result.event_type == "chest":
+                # ゴールド・アイテムを付与（ミミックは need_battle=True で上の分岐に入るためここには来ない）
+                if result.chest_gold > 0:
+                    User.add_gold(db, user_id, result.chest_gold)
+                if result.chest_item_id > 0:
+                    Inventory.add_item(db, user_id, result.chest_item_id, quantity=1)
+
             elif result.event_type == "merchant":
                 st.session_state["merchant_stock"] = result.merchant_stock
                 st.session_state["show_merchant"]  = True

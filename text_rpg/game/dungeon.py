@@ -11,8 +11,15 @@ from models.enemy import Enemy
 from config import (
     ENCOUNTER_RATE, ENCOUNTER_COUNT, ROOMS_PER_FLOOR,
     EVENT_WEIGHTS, TRAP_DAMAGE_PCT, REST_HEAL_PCT, SHRINE_HEAL_PCT,
-    MERCHANT_STOCK,
+    MERCHANT_STOCK, CHEST_GOLD_RANGE, CHEST_PATTERNS, CHEST_ITEM_IDS,
 )
+
+# ミミックのフロア別ステータス（DB 非保存・戦闘時にインメモリ生成）
+_MIMIC_STATS: dict[int, dict] = {
+    1: {"hp": 45,  "attack": 12, "defense": 5,  "exp_reward": 30, "gold_reward": 25},
+    2: {"hp": 65,  "attack": 16, "defense": 7,  "exp_reward": 45, "gold_reward": 40},
+    3: {"hp": 90,  "attack": 22, "defense": 10, "exp_reward": 60, "gold_reward": 60},
+}
 
 
 @dataclass
@@ -21,17 +28,21 @@ class EventResult:
     イベントマスの処理結果を格納するデータクラス。
 
     Attributes:
-        event_type : "encounter" / "trap" / "merchant" / "shrine" / "rest" / "nothing"
-        messages   : 戦闘ログ / イベントテキスト
-        enemies    : 戦闘イベントの場合の敵リスト（それ以外は空）
-        need_battle: True なら戦闘画面へ遷移が必要
-        merchant_stock : 商人マスの在庫 [{"item": Item, "price": int}]
+        event_type    : "encounter" / "trap" / "merchant" / "shrine" / "rest" / "chest" / "nothing"
+        messages      : 戦闘ログ / イベントテキスト
+        enemies       : 戦闘イベントの場合の敵リスト（それ以外は空）
+        need_battle   : True なら戦闘画面へ遷移が必要
+        merchant_stock: 商人マスの在庫 [{"item": Item, "price": int}]
+        chest_gold    : 宝箱マスで獲得するゴールド（ミミック・空は 0）
+        chest_item_id : 宝箱マスで獲得するアイテムID（ない場合は 0）
     """
     event_type: str = "nothing"
     messages: list[str] = field(default_factory=list)
     enemies: list = field(default_factory=list)
     need_battle: bool = False
     merchant_stock: list[dict] = field(default_factory=list)
+    chest_gold: int = 0
+    chest_item_id: int = 0
 
 
 class DungeonManager:
@@ -125,6 +136,8 @@ class DungeonManager:
             return self._event_shrine(party)
         elif event_type == "rest":
             return self._event_rest(party)
+        elif event_type == "chest":
+            return self._event_chest()
         else:
             return EventResult(event_type="nothing", messages=["静かだ…何も起きなかった。"])
 
@@ -222,6 +235,65 @@ class DungeonManager:
             messages.append(f"  {c.name}  HP +{healed_hp}  MP +{healed_mp}")
         messages.append(f"（最大HP/MPの {pct}% 回復）")
         return EventResult(event_type="shrine", messages=messages)
+
+    def _event_chest(self) -> EventResult:
+        """
+        宝箱マス: CHEST_PATTERNS の確率テーブルで 5 パターンを決定。
+          gold      : ゴールドのみ
+          item      : アイテムのみ
+          gold_item : ゴールド＋アイテム
+          mimic     : ミミック（戦闘遷移）
+          empty     : 空（ハズレ）
+        """
+        floor = self.current_floor
+        min_gold, max_gold = CHEST_GOLD_RANGE.get(floor, (20, 60))
+
+        patterns = [p[0] for p in CHEST_PATTERNS]
+        weights  = [p[1] for p in CHEST_PATTERNS]
+        pattern  = random.choices(patterns, weights=weights, k=1)[0]
+
+        # ミミック
+        if pattern == "mimic":
+            stats = _MIMIC_STATS.get(floor, _MIMIC_STATS[1])
+            mimic = Enemy(
+                name="ミミック",
+                dungeon_id=self.dungeon.id,
+                floor=floor,
+                is_boss=False,
+                status_resistance="",
+                **stats,
+            )
+            return EventResult(
+                event_type="chest",
+                messages=["📦 宝箱を発見した！", "👾 ミミックだ！！"],
+                enemies=[mimic],
+                need_battle=True,
+            )
+
+        gold    = 0
+        item_id = 0
+        messages = ["📦 宝箱を発見した！"]
+
+        if pattern in ("gold", "gold_item"):
+            gold = random.randint(min_gold, max_gold)
+            messages.append(f"  💰 {gold} G を手に入れた！")
+
+        if pattern in ("item", "gold_item"):
+            item_id = random.choice(CHEST_ITEM_IDS)
+            from models.item import Item
+            item = Item.get_by_id(self.db, item_id)
+            item_name = item.name if item else "アイテム"
+            messages.append(f"  🎁 {item_name} を手に入れた！")
+
+        if pattern == "empty":
+            messages.append("  📫 空だった…")
+
+        return EventResult(
+            event_type="chest",
+            messages=messages,
+            chest_gold=gold,
+            chest_item_id=item_id,
+        )
 
     def _event_merchant(self) -> EventResult:
         """商人マス: 在庫リストを返す。購入処理は呼び出し側（page）で行う。"""
