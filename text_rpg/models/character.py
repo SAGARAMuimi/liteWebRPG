@@ -91,6 +91,82 @@ class Character(Base):
         db.merge(self)
         db.commit()
 
+    # ──────────────────────────────────────────────────────
+    # R-11 装備システム
+    # ──────────────────────────────────────────────────────
+    def _apply_equip_bonus(self, equipment, sign: int) -> None:
+        """sign=+1 でボーナス付与、sign=-1 でボーナス削除"""
+        self.attack  += sign * equipment.atk_bonus
+        self.defense += sign * equipment.def_bonus
+        self.max_hp  += sign * equipment.hp_bonus
+        self.max_mp  += sign * equipment.mp_bonus
+
+    def equip(self, db: Session, equipment) -> str:
+        """
+        装備を付ける。同スロットに既存装備があれば先に外す。
+        ステータスボーナスをキャラクターの基礎値に加算して DB 保存する。
+        Returns: 処理メッセージ
+        """
+        from models.equipment import Equipment as Eq, CharacterEquipment as CE
+
+        # 同スロットの既存装備を外す
+        existing_ce = CE.get_by_slot(db, self.id, equipment.slot)
+        if existing_ce:
+            old_equip = Eq.get_by_id(db, existing_ce.equipment_id)
+            if old_equip:
+                self._apply_equip_bonus(old_equip, sign=-1)
+            db.query(CE).filter(
+                CE.character_id == self.id,
+                CE.slot == equipment.slot,
+            ).delete()
+            db.flush()
+
+        # 新装備のボーナスを加算
+        self._apply_equip_bonus(equipment, sign=+1)
+        # HP/MP を新 max 値でクランプ
+        self.hp = min(self.hp, self.max_hp)
+        self.mp = min(self.mp, self.max_mp)
+
+        # 装備スロットを DB に登録
+        db.add(CE(character_id=self.id, equipment_id=equipment.id, slot=equipment.slot))
+        merged = db.merge(self)
+        db.commit()
+        for attr in ("attack", "defense", "max_hp", "max_mp", "hp", "mp"):
+            setattr(self, attr, getattr(merged, attr))
+        return f"{self.name} が {equipment.name} を装備した！"
+
+    def unequip(self, db: Session, slot: str) -> str:
+        """
+        指定スロットの装備を外す。
+        ステータスボーナスをキャラクターの基礎値から減算して DB 保存する。
+        Returns: 処理メッセージ
+        """
+        from models.equipment import Equipment as Eq, CharacterEquipment as CE
+        from config import EQUIPMENT_SLOT_NAMES
+
+        existing_ce = CE.get_by_slot(db, self.id, slot)
+        if not existing_ce:
+            slot_name = EQUIPMENT_SLOT_NAMES.get(slot, slot)
+            return f"{slot_name} スロットに装備がありません。"
+
+        equip = Eq.get_by_id(db, existing_ce.equipment_id)
+        equip_name = equip.name if equip else "装備"
+        if equip:
+            self._apply_equip_bonus(equip, sign=-1)
+            # max_hp/max_mp が下がった場合、HP/MP を上限でクランプ
+            self.hp = min(self.hp, self.max_hp)
+            self.mp = min(self.mp, self.max_mp)
+
+        db.query(CE).filter(
+            CE.character_id == self.id,
+            CE.slot == slot,
+        ).delete()
+        merged = db.merge(self)
+        db.commit()
+        for attr in ("attack", "defense", "max_hp", "max_mp", "hp", "mp"):
+            setattr(self, attr, getattr(merged, attr))
+        return f"{self.name} が {equip_name} を外した。"
+
 
 class PartyMember(Base):
     __tablename__ = "party_members"

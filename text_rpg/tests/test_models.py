@@ -172,3 +172,97 @@ class TestEnemyGoldReward:
         )
         cloned = e.clone()
         assert cloned.gold_reward == 8
+
+
+# ─── 装備システムテスト ────────────────────────────────────
+class TestEquipmentModel:
+    def _make_equip(self, db, eid, name="テスト剣", slot="weapon",
+                    atk=5, def_=0, hp=0, mp=0, price=100, req=""):
+        from models.equipment import Equipment
+        eq = Equipment(id=eid, name=name, description="", slot=slot,
+                       atk_bonus=atk, def_bonus=def_,
+                       hp_bonus=hp, mp_bonus=mp,
+                       price=price, required_class=req)
+        db.add(eq)
+        db.commit()
+        db.refresh(eq)
+        return eq
+
+    def test_equip_weapon_raises_attack(self, db):
+        user  = User.create(db, "equser1", "pass")
+        chara = Character.create(db, user.id, "テスト戦士", "warrior")
+        base_atk = chara.attack
+        eq = self._make_equip(db, 100, atk=5)
+        chara.equip(db, eq)
+        assert chara.attack == base_atk + 5
+
+    def test_equip_armor_raises_defense_and_hp(self, db):
+        user  = User.create(db, "equser2", "pass")
+        chara = Character.create(db, user.id, "テスト僧侶", "priest")
+        base_def = chara.defense
+        base_mhp = chara.max_hp
+        eq = self._make_equip(db, 101, name="テスト鎧", slot="armor",
+                               atk=0, def_=4, hp=20)
+        chara.equip(db, eq)
+        assert chara.defense == base_def + 4
+        assert chara.max_hp  == base_mhp + 20
+
+    def test_equip_replaces_same_slot(self, db):
+        user  = User.create(db, "equser3", "pass")
+        chara = Character.create(db, user.id, "テスト盗賊", "thief")
+        base_atk = chara.attack
+        eq1 = self._make_equip(db, 102, name="剣A", atk=3)
+        eq2 = self._make_equip(db, 103, name="剣B", atk=7)
+        chara.equip(db, eq1)
+        chara.equip(db, eq2)  # 同スロットに上書き装備
+        assert chara.attack == base_atk + 7  # eq2 のボーナスのみ適用
+
+    def test_unequip_restores_stats(self, db):
+        user  = User.create(db, "equser4", "pass")
+        chara = Character.create(db, user.id, "テスト魔法使い", "mage")
+        base_atk = chara.attack
+        eq = self._make_equip(db, 104, atk=5)
+        chara.equip(db, eq)
+        assert chara.attack == base_atk + 5
+        chara.unequip(db, "weapon")
+        assert chara.attack == base_atk
+
+    def test_hp_clamped_after_unequip(self, db):
+        user  = User.create(db, "equser5", "pass")
+        chara = Character.create(db, user.id, "テスト騎士", "knight")
+        eq = self._make_equip(db, 105, name="テスト鎧2", slot="armor",
+                               atk=0, def_=0, hp=30)
+        chara.equip(db, eq)
+        pre_max_hp = chara.max_hp
+        chara.hp   = pre_max_hp  # 満タン状態にする
+        chara.unequip(db, "armor")
+        assert chara.max_hp == pre_max_hp - 30  # max_hp が戻る
+        assert chara.hp <= chara.max_hp          # HP が上限を超えない
+
+    def test_can_equip_class_filter(self):
+        from models.equipment import Equipment
+        eq = Equipment(id=999, name="鋼の剣", description="", slot="weapon",
+                       atk_bonus=6, def_bonus=0, hp_bonus=0, mp_bonus=0,
+                       price=280, required_class="warrior,knight")
+        assert eq.can_equip("warrior") is True
+        assert eq.can_equip("mage")    is False
+        assert eq.can_equip("knight")  is True
+
+    def test_can_equip_no_restriction(self):
+        from models.equipment import Equipment
+        eq = Equipment(id=998, name="銅の剣", description="", slot="weapon",
+                       atk_bonus=3, def_bonus=0, hp_bonus=0, mp_bonus=0,
+                       price=100, required_class="")
+        for cls in ["warrior", "mage", "thief", "priest",
+                    "knight", "archer", "monk", "bard"]:
+            assert eq.can_equip(cls) is True
+
+    def test_bonus_summary(self):
+        from models.equipment import Equipment
+        eq = Equipment(id=997, name="テスト装備", description="", slot="armor",
+                       atk_bonus=0, def_bonus=3, hp_bonus=10, mp_bonus=0,
+                       price=120, required_class="")
+        summary = eq.bonus_summary()
+        assert "DEF+3"  in summary
+        assert "HP+10"  in summary
+        assert "ATK"    not in summary  # ATK ボーナスなし

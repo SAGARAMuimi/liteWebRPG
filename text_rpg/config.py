@@ -143,6 +143,14 @@ TOWN_REST_COSTS: dict[str, dict] = {
 # アイテム1種類あたりの最大所持数（ショップ購入上限）
 TOWN_ITEM_MAX_STACK: int = 6
 
+# ─── 装備システム ─────────────────────────────────────────────
+# スロット表示名
+EQUIPMENT_SLOT_NAMES: dict[str, str] = {
+    "weapon":    "⚔️ 武器",
+    "armor":     "🛡️ 防具",
+    "accessory": "💍 アクセサリ",
+}
+
 # 商人の在庫（アイテムID とその定価）
 # id は items テーブルの初期データと対応
 MERCHANT_STOCK: list[dict] = [

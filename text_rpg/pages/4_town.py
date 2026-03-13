@@ -21,7 +21,9 @@ from config import (
     TOWN_SELL_RATE,
     TOWN_REST_COSTS,
     TOWN_ITEM_MAX_STACK,
+    EQUIPMENT_SLOT_NAMES,
 )
+from models.equipment import Equipment, CharacterEquipment
 
 st.set_page_config(page_title=f"町 | {APP_TITLE}", page_icon="🏘️", layout="wide")
 check_login()
@@ -68,9 +70,10 @@ with st.expander("🧑‍🤝‍🧑 パーティ状態", expanded=False):
 st.divider()
 
 # ─── タブ ───────────────────────────────────────────────────
-tab_shop, tab_sell, tab_inn, tab_leave = st.tabs([
+tab_shop, tab_sell, tab_equip, tab_inn, tab_leave = st.tabs([
     "🛒 ショップ",
     "💰 売却",
+    "⚔️ 装備",
     "🛌 宿屋",
     "🚪 帰還",
 ])
@@ -165,6 +168,114 @@ with tab_sell:
                         st.rerun()
                     else:
                         st.error("売却できませんでした。")
+
+# ════════════════════════════════════════════════════════════
+# ⚔️ 装備タブ
+# ════════════════════════════════════════════════════════════
+with tab_equip:
+    st.subheader("⚔️ 装備")
+
+    with SessionLocal() as db:
+        all_equips   = Equipment.get_all(db)
+        current_gold = User.get_gold(db, user_id)
+        equip_obj_map: dict[int, Equipment] = {e.id: e for e in all_equips}
+        # 各キャラの装備スロット {char_id: {slot: CharacterEquipment}}
+        equip_map: dict[int, dict[str, CharacterEquipment]] = {}
+        for chara in party:
+            slots = CharacterEquipment.get_for_character(db, chara.id)
+            equip_map[chara.id] = {ce.slot: ce for ce in slots}
+
+    # ── 現在の装備 ──────────────────────────────────────────────
+    st.markdown("#### 📦 現在の装備")
+    for chara in party:
+        with st.expander(
+            f"{chara.name}（{class_display_name(chara.class_type)}）"
+            f"  ATK:{chara.attack}  DEF:{chara.defense}  HP:{chara.max_hp}  MP:{chara.max_mp}",
+            expanded=True,
+        ):
+            slot_cols = st.columns(len(EQUIPMENT_SLOT_NAMES))
+            for col_idx, (slot_key, slot_label) in enumerate(EQUIPMENT_SLOT_NAMES.items()):
+                with slot_cols[col_idx]:
+                    st.markdown(f"**{slot_label}**")
+                    ce = equip_map.get(chara.id, {}).get(slot_key)
+                    if ce and ce.equipment_id in equip_obj_map:
+                        eq = equip_obj_map[ce.equipment_id]
+                        st.text(eq.name)
+                        st.caption(eq.bonus_summary())
+                        if st.button("外す", key=f"unequip_{chara.id}_{slot_key}",
+                                     use_container_width=True):
+                            with SessionLocal() as db:
+                                fresh = db.merge(chara)
+                                msg = fresh.unequip(db, slot_key)
+                                for attr in ("attack", "defense", "max_hp", "max_mp", "hp", "mp"):
+                                    setattr(chara, attr, getattr(fresh, attr))
+                            st.session_state["party"] = party
+                            st.success(msg)
+                            st.rerun()
+                    else:
+                        st.caption("— 装備なし —")
+
+    st.divider()
+
+    # ── 装備を購入して装備する ──────────────────────────────────────
+    st.markdown("#### 🛍️ 装備を購入して装備する")
+    st.caption("購入と同時に即座に装備されます。同スロットに既存の装備があれば自動で外します。")
+
+    alive_party = [c for c in party if c.is_alive()]
+    if not alive_party:
+        st.info("装備できるキャラクターがいません。")
+    else:
+        chara_labels = [f"{c.name}（{class_display_name(c.class_type)}）" for c in alive_party]
+        sel_idx   = st.selectbox("装備するキャラクター",
+                                 range(len(alive_party)),
+                                 format_func=lambda i: chara_labels[i],
+                                 key="equip_target_chara")
+        sel_chara = alive_party[sel_idx]
+        st.caption(f"💰 所持金: {current_gold} G")
+
+        for slot_key, slot_label in EQUIPMENT_SLOT_NAMES.items():
+            slot_equips = [
+                e for e in all_equips
+                if e.slot == slot_key and e.can_equip(sel_chara.class_type)
+            ]
+            if not slot_equips:
+                continue
+            st.markdown(f"**{slot_label}**")
+            e_cols = st.columns(3)
+            for i, eq in enumerate(slot_equips):
+                with e_cols[i % 3]:
+                    st.text(eq.name)
+                    st.caption(eq.description)
+                    st.caption(f"{eq.bonus_summary()}  /  💰 {eq.price} G")
+                    # 既に装備中か確認
+                    ce = equip_map.get(sel_chara.id, {}).get(slot_key)
+                    already = ce is not None and ce.equipment_id == eq.id
+                    can_buy = current_gold >= eq.price
+                    if already:
+                        st.button("✅ 装備中", key=f"buy_eq_{sel_chara.id}_{eq.id}",
+                                  disabled=True, use_container_width=True)
+                    elif not can_buy:
+                        st.button("購入して装備", key=f"buy_eq_{sel_chara.id}_{eq.id}",
+                                  disabled=True, help="所持金が足りません",
+                                  use_container_width=True)
+                    else:
+                        if st.button("購入して装備", key=f"buy_eq_{sel_chara.id}_{eq.id}",
+                                     use_container_width=True):
+                            with SessionLocal() as db:
+                                ok = User.spend_gold(db, user_id, eq.price)
+                            if ok:
+                                with SessionLocal() as db:
+                                    fresh_eq = Equipment.get_by_id(db, eq.id)
+                                    fresh_ch = db.merge(sel_chara)
+                                    msg = fresh_ch.equip(db, fresh_eq)
+                                    for attr in ("attack", "defense", "max_hp",
+                                                 "max_mp", "hp", "mp"):
+                                        setattr(sel_chara, attr, getattr(fresh_ch, attr))
+                                st.session_state["party"] = party
+                                st.success(f"✅ {msg}")
+                                st.rerun()
+                            else:
+                                st.error("所持金が足りません。")
 
 # ════════════════════════════════════════════════════════════
 # 🛌 宿屋タブ

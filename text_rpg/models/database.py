@@ -169,3 +169,63 @@ def migrate_db() -> None:
             ), {"id": row[0], "nm": row[1], "desc": row[2], "et": row[3],
                 "pw": row[4], "tt": row[5], "dur": row[6], "price": row[7]})
         conn.commit()
+
+        # ── R-11 装備システム ───────────────────────────────────────────
+
+        # equipments テーブル作成（存在しない場合）
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS equipments (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            VARCHAR(64)  NOT NULL,
+                description     VARCHAR(256) NOT NULL DEFAULT '',
+                slot            VARCHAR(16)  NOT NULL,
+                atk_bonus       INTEGER      NOT NULL DEFAULT 0,
+                def_bonus       INTEGER      NOT NULL DEFAULT 0,
+                hp_bonus        INTEGER      NOT NULL DEFAULT 0,
+                mp_bonus        INTEGER      NOT NULL DEFAULT 0,
+                price           INTEGER      NOT NULL DEFAULT 0,
+                required_class  VARCHAR(128) NOT NULL DEFAULT ''
+            )
+        """))
+        conn.commit()
+
+        # character_equipments テーブル作成（存在しない場合）
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS character_equipments (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                character_id    INTEGER NOT NULL REFERENCES characters(id),
+                equipment_id    INTEGER NOT NULL REFERENCES equipments(id),
+                slot            VARCHAR(16) NOT NULL,
+                UNIQUE(character_id, slot)
+            )
+        """))
+        conn.commit()
+
+        # 装備マスタ初期データ（INSERT OR IGNORE で冪等）
+        # (id, name, description, slot, atk_bonus, def_bonus, hp_bonus, mp_bonus, price, required_class)
+        initial_equips = [
+            # ── 武器 ──
+            (1,  "銅の剣",      "軽くて扱いやすい銅製の剣",          "weapon",    3, 0,  0,  0, 100, ""),
+            (2,  "鋼の剣",      "頑丈な鋼製の両手剣。戦士・騎士向け", "weapon",    6, 0,  0,  0, 280, "warrior,knight"),
+            (3,  "魔法の杖",    "魔力を込めた杖。MPも強化される",     "weapon",    3, 0,  0, 10, 200, "mage,priest,bard"),
+            (4,  "短刀",        "素早い連撃に特化した短刀",           "weapon",    5, 0,  0,  0, 150, "thief,archer"),
+            (5,  "鉄の拳",      "武道家専用の鉄製グローブ",           "weapon",    5, 2,  0,  0, 180, "monk"),
+            # ── 防具 ──
+            (6,  "皮の鎧",      "軽くて動きやすい革製の鎧",           "armor",     0, 3, 10,  0, 120, ""),
+            (7,  "鎖かたびら",  "重厚な鎖製の鎧。重戦士向け",         "armor",     0, 7, 25,  0, 320, "warrior,knight,monk"),
+            (8,  "魔法のローブ","魔力を高める特殊素材のローブ",       "armor",     0, 2,  5, 20, 220, "mage,priest,bard"),
+            (9,  "軽革鎧",      "弓手や盗賊向けの軽量装甲",           "armor",     0, 4, 15,  5, 230, "thief,archer"),
+            # ── アクセサリ ──
+            (10, "体力のリング","最大HPを上昇させる不思議な指輪",     "accessory", 0, 0, 20,  0, 150, ""),
+            (11, "魔力のリング","最大MPを上昇させる不思議な指輪",     "accessory", 0, 0,  0, 15, 150, ""),
+            (12, "鋼の腕輪",    "腕力を高める金属製の腕輪",           "accessory", 2, 0,  0,  0, 130, ""),
+        ]
+        for row in initial_equips:
+            conn.execute(text(
+                "INSERT OR IGNORE INTO equipments "
+                "(id, name, description, slot, atk_bonus, def_bonus, hp_bonus, mp_bonus, price, required_class) "
+                "VALUES (:id,:nm,:desc,:slot,:atk,:def,:hp,:mp,:price,:req)"
+            ), {"id": row[0], "nm": row[1], "desc": row[2], "slot": row[3],
+                "atk": row[4], "def": row[5], "hp": row[6], "mp": row[7],
+                "price": row[8], "req": row[9]})
+        conn.commit()

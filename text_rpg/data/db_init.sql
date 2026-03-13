@@ -86,3 +86,46 @@ INSERT OR IGNORE INTO items (id, name, description, effect_type, power, target_t
   (4, '万能薬',           '状態異常を全て回復する',       'cure',      0, 'ally', 0, 100),
   (5, 'フェニックスの羽', '戦闘不能を蘇生（HP30%）',     'revive',   30, 'ally', 0, 200),
   (6, '活力の薬',         'ATKを3上昇（3ターン）',       'buff_atk',  3, 'self', 3, 120);
+
+-- equipments テーブル（DDL）
+CREATE TABLE IF NOT EXISTS equipments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            VARCHAR(64)  NOT NULL,
+    description     VARCHAR(256) NOT NULL DEFAULT '',
+    slot            VARCHAR(16)  NOT NULL,
+    atk_bonus       INTEGER      NOT NULL DEFAULT 0,
+    def_bonus       INTEGER      NOT NULL DEFAULT 0,
+    hp_bonus        INTEGER      NOT NULL DEFAULT 0,
+    mp_bonus        INTEGER      NOT NULL DEFAULT 0,
+    price           INTEGER      NOT NULL DEFAULT 0,
+    required_class  VARCHAR(128) NOT NULL DEFAULT ''
+);
+
+-- character_equipments テーブル（DDL）
+CREATE TABLE IF NOT EXISTS character_equipments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    character_id    INTEGER NOT NULL REFERENCES characters(id),
+    equipment_id    INTEGER NOT NULL REFERENCES equipments(id),
+    slot            VARCHAR(16) NOT NULL,
+    UNIQUE(character_id, slot)
+);
+
+-- 装備マスタ初期データ
+INSERT OR IGNORE INTO equipments
+  (id, name, description, slot, atk_bonus, def_bonus, hp_bonus, mp_bonus, price, required_class)
+VALUES
+  -- 武器
+  (1,  '銅の剣',      '軽くて扱いやすい銅製の剣',          'weapon',    3, 0,  0,  0, 100, ''),
+  (2,  '鋼の剣',      '頑丈な鋼製の両手剣。戦士・騎士向け','weapon',    6, 0,  0,  0, 280, 'warrior,knight'),
+  (3,  '魔法の杖',    '魔力を込めた杖。MPも強化される',     'weapon',    3, 0,  0, 10, 200, 'mage,priest,bard'),
+  (4,  '短刀',        '素早い連撃に特化した短刀',           'weapon',    5, 0,  0,  0, 150, 'thief,archer'),
+  (5,  '鉄の拳',      '武道家専用の鉄製グローブ',           'weapon',    5, 2,  0,  0, 180, 'monk'),
+  -- 防具
+  (6,  '皮の鎧',      '軽くて動きやすい革製の鎧',           'armor',     0, 3, 10,  0, 120, ''),
+  (7,  '鎖かたびら',  '重厚な鎖製の鎧。重戦士向け',         'armor',     0, 7, 25,  0, 320, 'warrior,knight,monk'),
+  (8,  '魔法のローブ','魔力を高める特殊素材のローブ',       'armor',     0, 2,  5, 20, 220, 'mage,priest,bard'),
+  (9,  '軽革鎧',      '弓手や盗賊向けの軽量装甲',           'armor',     0, 4, 15,  5, 230, 'thief,archer'),
+  -- アクセサリ
+  (10, '体力のリング','最大HPを上昇させる不思議な指輪',     'accessory', 0, 0, 20,  0, 150, ''),
+  (11, '魔力のリング','最大MPを上昇させる不思議な指輪',     'accessory', 0, 0,  0, 15, 150, ''),
+  (12, '鋼の腕輪',    '腕力を高める金属製の腕輪',           'accessory', 2, 0,  0,  0, 130, '');
