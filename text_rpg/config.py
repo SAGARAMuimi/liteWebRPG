@@ -130,6 +130,19 @@ REST_HEAL_PCT: int = 20
 # 祈りの祠 回復量: HP/MP を最大値の %回復（休憩より多め）
 SHRINE_HEAL_PCT: int = 30
 
+# ─── 町設定 ───────────────────────────────────────────────────
+# 売却買取率（定価の何割で買い取るか）
+TOWN_SELL_RATE: float = 0.5
+
+# 宿屋の休息プラン（key → label, cost[G], pct[%]）
+TOWN_REST_COSTS: dict[str, dict] = {
+    "partial": {"label": "仮眠",         "cost": 30, "pct": 50},   # HP/MP 50%回復
+    "full":    {"label": "ゆっくり休む", "cost": 80, "pct": 100},  # HP/MP 全回復
+}
+
+# アイテム1種類あたりの最大所持数（ショップ購入上限）
+TOWN_ITEM_MAX_STACK: int = 6
+
 # 商人の在庫（アイテムID とその定価）
 # id は items テーブルの初期データと対応
 MERCHANT_STOCK: list[dict] = [

@@ -66,11 +66,13 @@ with SessionLocal() as db:
 with SessionLocal() as db:
     current_gold = User.get_gold(db, user_id)
 st.title("🏰 ダンジョン探索")
-col_title, col_gold = st.columns([5, 1])
+col_title, col_gold, col_town = st.columns([5, 1, 1])
 with col_title:
     st.subheader(f"📍 {dungeon_name}  {current_floor}F / {dungeon_max_floor}F")
 with col_gold:
     st.metric("💰 GOLD", f"{current_gold} G")
+with col_town:
+    st.page_link("pages/4_town.py", label="🏘️ 町へ")
 
 # ─── 難易度選択 ──────────────────────────────────────────────
 diff_keys   = list(DIFFICULTY_PRESETS.keys())
