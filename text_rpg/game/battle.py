@@ -38,6 +38,7 @@ class BattleEngine:
         exp_mult: float = 1.0,
         buffs: dict | None = None,
         hate: dict | None = None,
+        cooldowns: dict | None = None,
     ) -> None:
         self.party = party
         self.enemies = enemies
@@ -46,9 +47,11 @@ class BattleEngine:
         self._defending: set[int] = set()
         self.heal_mult = heal_mult
         self.exp_mult = exp_mult
-        # buffs/hate は session_state と同一オブジェクトを共有する
+        # buffs/hate/cooldowns は session_state と同一オブジェクトを共有する
         self.buffs: dict = buffs if buffs is not None else {}
         self.hate: dict[int, int] = hate if hate is not None else {}
+        self.cooldowns: dict[int, dict[int, int]] = cooldowns if cooldowns is not None else {}
+        # cooldowns: {character_id: {skill_id: remaining_turns}}
         # パーティ全員の初期ヘイトを設定（新規エントリのみ）
         for c in self.party:
             if c.id not in self.hate:
@@ -194,6 +197,20 @@ class BattleEngine:
                 del self.buffs[key]
         return messages
 
+    def get_skill_cooldown(self, character: Character, skill: Skill) -> int:
+        """スキルの残クールダウンターン数を返す（0 = 使用可能）"""
+        return self.cooldowns.get(character.id, {}).get(skill.id, 0) or 0
+
+    def tick_cooldowns(self) -> None:
+        """ターン終了時にクールダウンを 1 カウントダウンし、0 以下になったエントリを削除する"""
+        for char_id in list(self.cooldowns.keys()):
+            for skill_id in list(self.cooldowns[char_id].keys()):
+                self.cooldowns[char_id][skill_id] -= 1
+                if self.cooldowns[char_id][skill_id] <= 0:
+                    del self.cooldowns[char_id][skill_id]
+            if not self.cooldowns[char_id]:
+                del self.cooldowns[char_id]
+
     # ──────────────────────────────────────────────────────
     # ダメージ計算
     # ──────────────────────────────────────────────────────
@@ -243,7 +260,16 @@ class BattleEngine:
                 return "スキルが指定されていません。"
             if character.mp < skill.mp_cost:
                 return f"{character.name} の MP が足りない！"
+            # クールダウンチェック
+            cd_remaining = self.get_skill_cooldown(character, skill)
+            if cd_remaining > 0:
+                return f"{character.name} の {skill.name} はあと {cd_remaining} ターン使えない！"
             character.mp -= skill.mp_cost
+            # クールダウンをセット（cooldown > 0 のスキルのみ）
+            if (getattr(skill, "cooldown", None) or 0) > 0:
+                if character.id not in self.cooldowns:
+                    self.cooldowns[character.id] = {}
+                self.cooldowns[character.id][skill.id] = skill.cooldown
 
             etype = skill.effect_type
 

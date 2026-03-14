@@ -17,7 +17,7 @@ from game.battle import BattleEngine
 from models.user import User
 from utils.auth import check_login, get_current_user_id
 from utils.helpers import hp_bar, class_display_name
-from config import APP_TITLE, DIFFICULTY_PRESETS, STATUS_AILMENTS
+from config import APP_TITLE, DIFFICULTY_PRESETS, STATUS_AILMENTS, LEVEL_UP_PLANS, CLASS_DEFAULT_LEVELUP_PLAN
 
 st.set_page_config(page_title=f"戦闘 | {APP_TITLE}", page_icon="⚔️", layout="wide")
 check_login()
@@ -72,10 +72,14 @@ if "battle_buffs" not in st.session_state:
     st.session_state["battle_buffs"] = {}
 if "battle_hate" not in st.session_state:
     st.session_state["battle_hate"] = {}
+if "battle_cooldowns" not in st.session_state:
+    st.session_state["battle_cooldowns"] = {}
 if "battle_inventory" not in st.session_state:
     st.session_state["battle_inventory"] = []
 if "show_item_panel" not in st.session_state:
     st.session_state["show_item_panel"] = False
+if "pending_levelups" not in st.session_state:
+    st.session_state["pending_levelups"] = []
 
 # 戦闘開始時にインベントリを DB からロード（battle_enemies が初層に設定されたタイミング）
 if not st.session_state["battle_inventory"] and st.session_state.get("battle_enemies"):
@@ -95,6 +99,7 @@ engine = BattleEngine(
     exp_mult=_diff_cfg["exp_mult"],
     buffs=st.session_state["battle_buffs"],
     hate=st.session_state["battle_hate"],
+    cooldowns=st.session_state["battle_cooldowns"],
 )
 engine.turn = st.session_state["battle_turn"]
 engine._defending = st.session_state["defending_chars"]
@@ -111,26 +116,65 @@ if engine.is_all_enemies_dead():
         total_exp = engine.get_total_exp()
         diff_cfg = DIFFICULTY_PRESETS.get(st.session_state.get("difficulty", "normal"), DIFFICULTY_PRESETS["normal"])
         total_gold = int(sum(e.gold_reward for e in enemies) * diff_cfg["gold_mult"])
-        leveled: list[str] = []
+        pending_lv: list[dict] = []
         with SessionLocal() as db:
             for chara in party:
                 if engine.is_party_wiped():
                     break
                 if chara.is_alive():
-                    up = chara.gain_exp(db, total_exp)
-                    if up:
-                        leveled.append(chara.name)
+                    levels_gained = chara.gain_exp(db, total_exp)
+                    if levels_gained > 0:
+                        pending_lv.append({
+                            "char_id":    chara.id,
+                            "char_name":  chara.name,
+                            "class_type": chara.class_type,
+                            "levels":     levels_gained,
+                            "new_level":  chara.level,
+                        })
             User.add_gold(db, user_id, total_gold)
         st.session_state["battle_result"] = "win"
-        st.session_state["battle_exp"] = total_exp
-        st.session_state["battle_gold"] = total_gold
-        st.session_state["battle_leveled"] = leveled
+        st.session_state["battle_exp"]    = total_exp
+        st.session_state["battle_gold"]   = total_gold
+        st.session_state["pending_levelups"] = pending_lv
     st.success(
         f"🎉 勝利！  獲得 EXP: {st.session_state['battle_exp']}  "
         f"💰 獲得 GOLD: {st.session_state.get('battle_gold', 0)} G"
     )
-    if st.session_state.get("battle_leveled"):
-        st.info(f"レベルアップ！: {', '.join(st.session_state['battle_leveled'])}")
+    # ─── レベルアップ成長プラン選択 UI ───────────────────────────────
+    _pending = st.session_state.get("pending_levelups", [])
+    if _pending:
+        _cur = _pending[0]
+        _default_plan = CLASS_DEFAULT_LEVELUP_PLAN.get(_cur["class_type"], "balanced")
+        st.subheader(f"🌟 {_cur['char_name']} が Lv {_cur['new_level']} になった！")
+        if _cur["levels"] > 1:
+            st.caption(f"（{_cur['levels']} レベルアップ）")
+        st.write("🌱 **成長方針を選んでください**")
+        _plan_cols = st.columns(len(LEVEL_UP_PLANS))
+        for _pi, (_pkey, _pdata) in enumerate(LEVEL_UP_PLANS.items()):
+            with _plan_cols[_pi]:
+                _is_default = (_pkey == _default_plan)
+                _btn_label = f"{_pdata['label']}{' ★おすすめ' if _is_default else ''}"
+                g = _pdata["growth"]
+                _help = (
+                    f"{_pdata['desc']}\n"
+                    f"HP +{g['max_hp'][0]}〜{g['max_hp'][1]}  "
+                    f"MP +{g['max_mp'][0]}〜{g['max_mp'][1]}  "
+                    f"ATK +{g['attack'][0]}〜{g['attack'][1]}  "
+                    f"DEF +{g['defense'][0]}〜{g['defense'][1]}"
+                )
+                if st.button(
+                    _btn_label,
+                    key=f"lvup_{_cur['char_id']}_{_pkey}",
+                    help=_help,
+                    use_container_width=True,
+                ):
+                    _chara = next((c for c in party if c.id == _cur["char_id"]), None)
+                    if _chara:
+                        with SessionLocal() as db:
+                            _chara.apply_growth(db, _pkey, _cur["levels"])
+                    st.session_state["pending_levelups"] = _pending[1:]
+                    st.rerun()
+        st.stop()
     # battle_enemies のクリアはボタン内で行う（先にクリアすると再レンダリング時に警告が出る）
     if st.button("ダンジョンへ戻る"):
         st.session_state["battle_enemies"] = []
@@ -139,11 +183,12 @@ if engine.is_all_enemies_dead():
         st.session_state["show_skill_panel"] = False
         st.session_state["show_item_panel"] = False
         st.session_state["battle_inventory"] = []
-        st.session_state["battle_exp"] = 0
+        st.session_state["battle_exp"]  = 0
         st.session_state["battle_gold"] = 0
-        st.session_state["battle_leveled"] = []
+        st.session_state["pending_levelups"] = []
         st.session_state["battle_buffs"] = {}
         st.session_state["battle_hate"] = {}
+        st.session_state["battle_cooldowns"] = {}
         st.switch_page("pages/2_dungeon.py")
     st.stop()
 
@@ -163,8 +208,10 @@ if engine.is_party_wiped():
         st.session_state["show_skill_panel"] = False
         st.session_state["show_item_panel"] = False
         st.session_state["battle_inventory"] = []
+        st.session_state["pending_levelups"] = []
         st.session_state["battle_buffs"] = {}
         st.session_state["battle_hate"] = {}
+        st.session_state["battle_cooldowns"] = {}
         st.switch_page("pages/1_character.py")
     st.stop()
 
@@ -318,6 +365,8 @@ def do_enemy_turn():
     tick_msgs = engine.tick_buffs()
     if tick_msgs:
         st.session_state["battle_log"].extend(tick_msgs)
+    # クールダウンのカウントダウン
+    engine.tick_cooldowns()
     st.session_state["battle_turn"] = engine.turn
     st.session_state["defending_chars"] = engine._defending
     # HP を DB に保存
@@ -370,7 +419,8 @@ if st.session_state.get("show_skill_panel"):
         skill_cols = st.columns(len(skills))
         for i, skill in enumerate(skills):
             with skill_cols[i]:
-                can_use = attacker.mp >= skill.mp_cost
+                cd = engine.get_skill_cooldown(attacker, skill)
+                can_use = attacker.mp >= skill.mp_cost and cd == 0
                 effect_icon = {
                     "attack":    "⚔️",
                     "heal":      "💚",
@@ -385,8 +435,16 @@ if st.session_state.get("show_skill_panel"):
                     "def_down": "🔓",
                     "cure":     "✨",
                 }.get(skill.effect_type, "")
-                label = f"{effect_icon} {skill.name}\nMP:{skill.mp_cost}"
-                if st.button(label, key=f"skill_{skill.id}", disabled=not can_use, use_container_width=True):
+                if cd > 0:
+                    label = f"⏳ {skill.name}\nあと{cd}T"
+                    help_text = f"CD: あと {cd} ターン"
+                else:
+                    label = f"{effect_icon} {skill.name}\nMP:{skill.mp_cost}"
+                    help_text = None
+                if st.button(label, key=f"skill_{skill.id}",
+                             disabled=not can_use,
+                             help=help_text,
+                             use_container_width=True):
                     etype = skill.effect_type
                     if etype == "heal":
                         msg = engine.player_action(attacker, "skill", target=target_heal, skill=skill)

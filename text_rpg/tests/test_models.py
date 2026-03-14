@@ -92,7 +92,7 @@ class TestCharacterModel:
         user = User.create(db, "player6", "pass")
         chara = Character.create(db, user.id, "英雄", "warrior")
         leveled = chara.gain_exp(db, 50)  # Lv1 必要EXP = 50
-        assert leveled is True
+        assert leveled >= 1
         assert chara.level == 2
 
 
@@ -343,3 +343,74 @@ class TestEquipmentModel:
         CI.consume(db, chara.id, eq.id, qty=1)
         rows = CI.get_for_character(db, chara.id)
         assert len(rows) == 0
+
+
+class TestLevelUpPlans:
+    """R-07 選択式成長プランのテスト"""
+
+    def test_gain_exp_returns_int_level_count(self, db):
+        """gain_exp はレベルアップ回数（int）を返す"""
+        user  = User.create(db, "lv_cnt", "pass")
+        chara = Character.create(db, user.id, "カウント者", "warrior")
+        # Lv1→Lv2: 50, Lv2→Lv3: 100 → 計 150 で 2 レベル
+        levels = chara.gain_exp(db, 150)
+        assert levels == 2
+        assert chara.level == 3
+
+    def test_gain_exp_no_levelup_returns_zero(self, db):
+        """EXP が不足なら 0 を返す"""
+        user  = User.create(db, "lv_zero", "pass")
+        chara = Character.create(db, user.id, "未成長", "mage")
+        levels = chara.gain_exp(db, 10)
+        assert levels == 0
+        assert chara.level == 1
+
+    def test_apply_growth_power_boosts_attack(self, db):
+        """power プランで attack が +3 以上増加"""
+        user  = User.create(db, "lv_power", "pass")
+        chara = Character.create(db, user.id, "地偽い戦士", "warrior")
+        old_atk = chara.attack
+        chara.apply_growth(db, "power", times=1)
+        assert chara.attack >= old_atk + 3  # power の attack min = 3
+
+    def test_apply_growth_tank_boosts_hp(self, db):
+        """tank プランで max_hp が +15 以上増加"""
+        user  = User.create(db, "lv_tank", "pass")
+        chara = Character.create(db, user.id, "強固騎士", "knight")
+        old_hp = chara.max_hp
+        chara.apply_growth(db, "tank", times=1)
+        assert chara.max_hp >= old_hp + 15  # tank の max_hp min = 15
+
+    def test_apply_growth_support_boosts_mp(self, db):
+        """support プランで max_mp が +6 以上増加"""
+        user  = User.create(db, "lv_sup", "pass")
+        chara = Character.create(db, user.id, "回復僧侶", "priest")
+        old_mp = chara.max_mp
+        chara.apply_growth(db, "support", times=1)
+        assert chara.max_mp >= old_mp + 6  # support の max_mp min = 6
+
+    def test_apply_growth_restores_full_hp_mp(self, db):
+        """apply_growth 後に HP/MP が全回復する"""
+        user  = User.create(db, "lv_full", "pass")
+        chara = Character.create(db, user.id, "低体力者", "warrior")
+        chara.hp = 1
+        chara.mp = 0
+        chara.apply_growth(db, "balanced", times=1)
+        assert chara.hp == chara.max_hp
+        assert chara.mp == chara.max_mp
+
+    def test_apply_growth_multiple_times_stacks(self, db):
+        """times=3 指定で power min の 3倍以上 attack が増加"""
+        user  = User.create(db, "lv_multi", "pass")
+        chara = Character.create(db, user.id, "連続強化", "warrior")
+        old_atk = chara.attack
+        chara.apply_growth(db, "power", times=3)
+        assert chara.attack >= old_atk + 9  # 3 per level * 3 levels
+
+    def test_apply_growth_invalid_plan_fallback(self, db):
+        """unknown プランは balanced にフォールバック"""
+        user  = User.create(db, "lv_inv", "pass")
+        chara = Character.create(db, user.id, "未知プラン", "warrior")
+        old_hp = chara.max_hp
+        chara.apply_growth(db, "unknown_plan", times=1)
+        assert chara.max_hp >= old_hp + 10  # balanced の max_hp min = 10

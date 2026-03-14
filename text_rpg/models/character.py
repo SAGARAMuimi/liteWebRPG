@@ -7,7 +7,7 @@ import random
 from sqlalchemy import String, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, Session
 from models.database import Base
-from config import CLASS_INITIAL_STATS, EXP_PER_LEVEL, LEVEL_UP_GROWTH
+from config import CLASS_INITIAL_STATS, EXP_PER_LEVEL, LEVEL_UP_GROWTH, LEVEL_UP_PLANS, CLASS_DEFAULT_LEVELUP_PLAN
 
 
 class Character(Base):
@@ -63,26 +63,54 @@ class Character(Base):
         self.hp = min(self.max_hp, self.hp + amount)
         return self.hp - before
 
-    def gain_exp(self, db: Session, amount: int) -> bool:
-        """経験値を加算し、レベルアップした場合 True を返す"""
+    def gain_exp(self, db: Session, amount: int) -> int:
+        """
+        経験値を加算し、レベルアップした回数を返す。
+        ステータス成長は apply_growth() で別途適用する（R-07 選択式成長）。
+        """
         self.exp += amount
-        leveled_up = False
+        levels_gained = 0
         while self.exp >= self.level * EXP_PER_LEVEL:
             self.exp -= self.level * EXP_PER_LEVEL
-            self.level_up()
-            leveled_up = True
+            self.level += 1
+            levels_gained += 1
         merged = db.merge(self)
         db.commit()
-        # session_state上のオブジェクトにも変更を反映
-        for attr in ("exp", "level", "hp", "max_hp", "mp", "max_mp", "attack", "defense"):
+        # session_state 上のオブジェクトにも変更を反映（exp / level のみ）
+        for attr in ("exp", "level"):
             setattr(self, attr, getattr(merged, attr))
-        return leveled_up
+        return levels_gained
 
-    def level_up(self) -> None:
+    def apply_growth(self, db: Session, plan_key: str, times: int = 1) -> dict[str, int]:
+        """
+        成長プランに基づいてステータスを増加させ DB に保存する。
+        plan_key: LEVEL_UP_PLANS のキー（"power" / "tank" / "support" / "balanced"）
+        times: レベルアップ回数（複数レベルアップした場合は times > 1）
+        Returns: 各ステータスの増加量 dict
+        """
+        plan = LEVEL_UP_PLANS.get(plan_key, LEVEL_UP_PLANS["balanced"])
+        growth_cfg = plan["growth"]
+        deltas: dict[str, int] = {k: 0 for k in growth_cfg}
+        for _ in range(times):
+            for stat, (mn, mx) in growth_cfg.items():
+                val = random.randint(mn, mx)
+                setattr(self, stat, getattr(self, stat) + val)
+                deltas[stat] += val
+        # レベルアップ後に HP / MP を全回復
+        self.hp = self.max_hp
+        self.mp = self.max_mp
+        merged = db.merge(self)
+        db.commit()
+        for attr in ("hp", "max_hp", "mp", "max_mp", "attack", "defense"):
+            setattr(self, attr, getattr(merged, attr))
+        return deltas
+
+    def level_up(self, plan_key: str = "balanced") -> None:
+        """レベルを 1 上げてステータスを成長させる（DB 保存なし）。後方互換・テスト用。"""
         self.level += 1
-        for stat, (mn, mx) in LEVEL_UP_GROWTH.items():
-            growth = random.randint(mn, mx)
-            setattr(self, stat, getattr(self, stat) + growth)
+        plan = LEVEL_UP_PLANS.get(plan_key, LEVEL_UP_PLANS["balanced"])
+        for stat, (mn, mx) in plan["growth"].items():
+            setattr(self, stat, getattr(self, stat) + random.randint(mn, mx))
         # レベルアップ時に HP / MP を全回復
         self.hp = self.max_hp
         self.mp = self.max_mp

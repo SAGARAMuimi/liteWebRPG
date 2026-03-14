@@ -56,6 +56,42 @@ LEVEL_UP_GROWTH: dict[str, tuple[int, int]] = {
     "defense": (1,  2),
 }
 
+# R-07 選択式成長プラン
+LEVEL_UP_PLANS: dict[str, dict] = {
+    "power": {
+        "label": "⚔️ 火力",
+        "desc": "攻撃力を重点的に強化する",
+        "growth": {"max_hp": (5, 8), "max_mp": (2, 4), "attack": (3, 5), "defense": (1, 2)},
+    },
+    "tank": {
+        "label": "🛡️ 耐久",
+        "desc": "HPと防御力を重点的に強化する",
+        "growth": {"max_hp": (15, 20), "max_mp": (1, 3), "attack": (1, 2), "defense": (2, 4)},
+    },
+    "support": {
+        "label": "💫 支援",
+        "desc": "MPを重点的に強化する（スキル・回復向け）",
+        "growth": {"max_hp": (8, 12), "max_mp": (6, 12), "attack": (1, 2), "defense": (1, 3)},
+    },
+    "balanced": {
+        "label": "⚖️ バランス",
+        "desc": "全ステータスをバランス良く強化する",
+        "growth": {"max_hp": (10, 15), "max_mp": (3, 8), "attack": (1, 3), "defense": (1, 2)},
+    },
+}
+
+# クラスごとのデフォルト成長プラン（レベルアップ選択画面でハイライトされる推奨プラン）
+CLASS_DEFAULT_LEVELUP_PLAN: dict[str, str] = {
+    "warrior": "power",
+    "mage":    "support",
+    "thief":   "power",
+    "priest":  "support",
+    "knight":  "tank",
+    "archer":  "power",
+    "monk":    "tank",
+    "bard":    "support",
+}
+
 # ─── ダンジョン設定 ────────────────────────────────────────
 ENCOUNTER_RATE: dict[int, float] = {1: 0.6, 2: 0.7, 3: 0.8}
 ENCOUNTER_COUNT: dict[int, tuple[int, int]] = {

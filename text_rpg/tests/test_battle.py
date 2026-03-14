@@ -90,6 +90,9 @@ class TestSkillAction:
         s.effect_type = effect_type
         s.mp_cost = mp_cost
         s.power = power
+        s.cooldown = 0  # クールダウンなし（デフォルト）
+        s.duration = 0
+        s.target_type = "enemy"
         return s
 
     def test_attack_skill_costs_mp(self):
@@ -246,6 +249,7 @@ class TestStatusAilment:
         s.power = 0
         s.target_type = target_type
         s.duration = duration
+        s.cooldown = 0  # クールダウンなし
         return s
 
     # ── apply_status / has_status ──────────────────────────────────────────────
@@ -436,3 +440,79 @@ class TestItemUse:
         assert atk_buffs[0]["amount"] == 3
         assert "上昇" in msg
 
+
+# ─── クールダウンテスト ───────────────────────────────────────
+class TestCooldown:
+    def setup_method(self):
+        self.chara = make_character(mp=50)
+        self.enemy = make_enemy(hp=100)
+        self.engine = BattleEngine([self.chara], [self.enemy])
+
+    def _make_skill(self, effect_type="attack", mp_cost=10, power=20, cooldown=2):
+        s = Skill()
+        s.id = 99
+        s.name = "CD付きスキル"
+        s.effect_type = effect_type
+        s.mp_cost = mp_cost
+        s.power = power
+        s.cooldown = cooldown
+        s.duration = 0
+        s.target_type = "enemy"
+        return s
+
+    def test_no_cooldown_after_use_when_zero(self):
+        """cooldown=0 のスキルは使用後にクールダウンが設定されない"""
+        s = self._make_skill(cooldown=0)
+        self.engine.player_action(self.chara, "skill", target=self.enemy, skill=s)
+        assert self.engine.get_skill_cooldown(self.chara, s) == 0
+
+    def test_cooldown_set_after_use(self):
+        """cooldown=2 のスキルを使用すると残り2ターンのCDが設定される"""
+        s = self._make_skill(cooldown=2)
+        self.engine.player_action(self.chara, "skill", target=self.enemy, skill=s)
+        assert self.engine.get_skill_cooldown(self.chara, s) == 2
+
+    def test_cooldown_blocks_reuse(self):
+        """CD中にスキルを使うとブロックメッセージが返りMPを消費しない"""
+        s = self._make_skill(cooldown=2)
+        self.engine.player_action(self.chara, "skill", target=self.enemy, skill=s)
+        mp_before = self.chara.mp
+        msg = self.engine.player_action(self.chara, "skill", target=self.enemy, skill=s)
+        assert "使えない" in msg
+        assert self.chara.mp == mp_before  # MP を消費しない
+
+    def test_tick_cooldowns_decrements(self):
+        """tick_cooldowns を1回呼ぶと残ターンが1減る"""
+        s = self._make_skill(cooldown=2)
+        self.engine.player_action(self.chara, "skill", target=self.enemy, skill=s)
+        self.engine.tick_cooldowns()
+        assert self.engine.get_skill_cooldown(self.chara, s) == 1
+
+    def test_tick_cooldowns_clears_when_zero(self):
+        """tick_cooldowns で0以下になるとCDエントリが削除される"""
+        s = self._make_skill(cooldown=1)
+        self.engine.player_action(self.chara, "skill", target=self.enemy, skill=s)
+        self.engine.tick_cooldowns()
+        assert self.engine.get_skill_cooldown(self.chara, s) == 0  # エントリ削除 → 0 返る
+
+    def test_skill_usable_after_cooldown_expires(self):
+        """CD切れ後はスキルが再度使用できる"""
+        s = self._make_skill(cooldown=1)
+        self.chara.mp = 50
+        self.engine.player_action(self.chara, "skill", target=self.enemy, skill=s)
+        self.engine.tick_cooldowns()  # CD 0 になる
+        mp_before = self.chara.mp
+        msg = self.engine.player_action(self.chara, "skill", target=self.enemy, skill=s)
+        assert "使えない" not in msg
+        assert self.chara.mp < mp_before  # MP を消費した
+
+    def test_cooldown_is_per_character(self):
+        """CDは各キャラクター独立して管理される"""
+        chara2 = make_character(name="魔法使い", class_type="mage", mp=50)
+        chara2.id = 2
+        engine2 = BattleEngine([self.chara, chara2], [self.enemy])
+        s = self._make_skill(cooldown=2)
+        engine2.player_action(self.chara, "skill", target=self.enemy, skill=s)
+        # chara1 はCD中だが chara2 はCDなし
+        assert engine2.get_skill_cooldown(self.chara, s) == 2
+        assert engine2.get_skill_cooldown(chara2, s) == 0

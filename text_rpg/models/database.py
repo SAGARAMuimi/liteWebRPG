@@ -74,6 +74,7 @@ def migrate_db() -> None:
         for ddl in [
             "ALTER TABLE skills ADD COLUMN target_type VARCHAR(16) DEFAULT 'self'",
             "ALTER TABLE skills ADD COLUMN duration INTEGER DEFAULT 0",
+            "ALTER TABLE skills ADD COLUMN cooldown INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(text(ddl))
@@ -106,6 +107,31 @@ def migrate_db() -> None:
             "UPDATE enemies SET status_resistance='stun' "
             "WHERE is_boss=1 AND (status_resistance IS NULL OR status_resistance='')"
         ))
+        conn.commit()
+
+        # 各スキルのクールダウン値を設定（DEFAULT 0 のままのもののみを更新）
+        skill_cooldowns = [
+            (1,  2),  # ファイア（mage 強力攻撃）
+            (2,  2),  # ヒール（priest 回復）
+            (3,  1),  # バックスタブ（thief）
+            (4,  1),  # チャージ（warrior）
+            # id=5 ポーション：0（クールダウンなし）
+            (6,  3),  # 挑発（knight バフ）
+            (7,  1),  # シールドバッシュ（knight）
+            (8,  1),  # 連射（archer）
+            (9,  2),  # 矢雨（archer 高威力）
+            (10, 3),  # 気合い（monk バフ）
+            (11, 1),  # 連打（monk）
+            (12, 3),  # 鼓舞の歌（bard 全体バフ）
+            (13, 2),  # 癌しの歌（bard 回復）
+            (14, 2),  # 浄化（priest）
+            (15, 3),  # 毒霧（mage 全体毒）
+            (16, 2),  # 目眩まし（thief）
+            (17, 2),  # 毒矢（archer）
+            (18, 2),  # 鹾裂き（warrior）
+        ]
+        for sid, cd in skill_cooldowns:
+            conn.execute(text(f"UPDATE skills SET cooldown={cd} WHERE id={sid}"))
         conn.commit()
 
         # 状態異常スキルを追加（既存 DB への冪等 INSERT）

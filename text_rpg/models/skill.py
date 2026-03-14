@@ -22,6 +22,8 @@ class Skill(Base):
     # target_type: self / ally / all_allies / enemy / all_enemies
     duration: Mapped[int] = mapped_column(nullable=False, server_default="0")
     # duration: バフ/デバフの持続ターン数（0 = 持続なし）
+    cooldown: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    # cooldown: スキル使用後に再使用できるまでのターン数（0 = クールダウンなし）
 
     @staticmethod
     def get_for_class(db: Session, class_type: str) -> list["Skill"]:
