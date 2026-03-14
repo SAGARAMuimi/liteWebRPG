@@ -29,6 +29,49 @@ _STATUS_NAMES: dict[str, str] = {
 }
 
 
+class EnemyAI:
+    """敵AIのフェーズ判定・行動選択を担うユーティリティクラス。"""
+
+    @staticmethod
+    def get_phase(enemy: "Enemy", max_hp: int) -> str:
+        """NORMAL / DANGER を返す"""
+        ratio = enemy.hp / max(1, max_hp)
+        return "DANGER" if ratio <= 0.5 else "NORMAL"
+
+    @staticmethod
+    def is_win_first(party: list["Character"]) -> bool:
+        """瞤死のパーティメンバーがいるか（HP ≤ 15%）"""
+        for c in party:
+            if c.is_alive() and c.max_hp > 0 and c.hp / c.max_hp <= 0.15:
+                return True
+        return False
+
+    @staticmethod
+    def select_win_first_target(party: list["Character"]) -> "Character | None":
+        """最低HP率の生存キャラを返す"""
+        alive = [c for c in party if c.is_alive()]
+        if not alive:
+            return None
+        return min(alive, key=lambda c: c.hp / max(1, c.max_hp))
+
+    @staticmethod
+    def choose_action(enemy: "Enemy", phase: str, rotation_idx: int) -> tuple[str, dict]:
+        """
+        フェーズとローテーションインデックスから行動名と効果定義を返す。
+        Returns: (action_name: str, action_def: dict)
+        """
+        from config import ENEMY_AI_ACTIONS
+        pattern = ENEMY_AI_ACTIONS.get(enemy.name, ENEMY_AI_ACTIONS["default"])
+        if phase == "DANGER":
+            priority = pattern.get("danger_priority", ["attack"])
+            action_name = priority[rotation_idx % len(priority)]
+        else:
+            rotation = pattern.get("normal_rotation", ["attack"])
+            action_name = rotation[rotation_idx % len(rotation)]
+        action_def = pattern.get("actions", {}).get(action_name, {"type": "attack"})
+        return action_name, action_def
+
+
 class BattleEngine:
     def __init__(
         self,
@@ -39,6 +82,8 @@ class BattleEngine:
         buffs: dict | None = None,
         hate: dict | None = None,
         cooldowns: dict | None = None,
+        enemy_max_hp: dict | None = None,
+        enemy_rotation_idx: dict | None = None,
     ) -> None:
         self.party = party
         self.enemies = enemies
@@ -52,6 +97,15 @@ class BattleEngine:
         self.hate: dict[int, int] = hate if hate is not None else {}
         self.cooldowns: dict[int, dict[int, int]] = cooldowns if cooldowns is not None else {}
         # cooldowns: {character_id: {skill_id: remaining_turns}}
+        # 敵の最大HP（フェーズ判定用）とローテーションインデックス（session_state と共有）
+        self.enemy_max_hp: dict[int, int] = (
+            enemy_max_hp if enemy_max_hp is not None
+            else {e.id: e.hp for e in enemies}
+        )
+        self.enemy_rotation_idx: dict[int, int] = (
+            enemy_rotation_idx if enemy_rotation_idx is not None
+            else {e.id: 0 for e in enemies}
+        )
         # パーティ全員の初期ヘイトを設定（新規エントリのみ）
         for c in self.party:
             if c.id not in self.hate:
@@ -382,7 +436,7 @@ class BattleEngine:
     # 敵ターン
     # ──────────────────────────────────────────────────────
     def enemy_action(self) -> list[str]:
-        """全生存敵がヘイトに基づいてパーティメンバーを攻撃する"""
+        """全生存敵がAIに基づいて行動する（R-12 ルールベースAI）"""
         messages: list[str] = []
         if not any(c.is_alive() for c in self.party):
             return messages
@@ -393,23 +447,107 @@ class BattleEngine:
             if self.has_status(enemy, "stun"):
                 messages.append(f"{enemy.name} はスタン状態で行動できない！")
                 continue
-            target = self._select_target()
-            if target is None:
-                continue
-            atk = self.get_effective_attack(enemy)
-            effective_def = self.get_effective_defense(target)
-            if target.id in self._defending:
-                effective_def *= 2
-            dmg = self.calc_damage(atk, effective_def)
-            actual = target.take_damage(dmg)
-            msg = f"{enemy.name} の攻撃！ {target.name} に {actual} のダメージ！"
-            if not target.is_alive():
-                msg += f" {target.name} は倒れた…"
+
+            max_hp  = self.enemy_max_hp.get(enemy.id, enemy.hp)
+            phase   = EnemyAI.get_phase(enemy, max_hp)
+            rot_idx = self.enemy_rotation_idx.get(enemy.id, 0)
+
+            action_name, action_def = EnemyAI.choose_action(enemy, phase, rot_idx)
+            # ローテーションインデックスを進める
+            self.enemy_rotation_idx[enemy.id] = rot_idx + 1
+
+            # WIN_FIRST チェック（DANGER 時のみ）
+            if phase == "DANGER" and EnemyAI.is_win_first(self.party):
+                forced_target = EnemyAI.select_win_first_target(self.party)
+            else:
+                forced_target = None
+
+            msg = self._execute_enemy_action(enemy, action_name, action_def, forced_target)
             messages.append(msg)
 
         self._defending.clear()
         self.turn += 1
         return messages
+
+    def _execute_enemy_action(
+        self,
+        enemy: Enemy,
+        action_name: str,
+        action_def: dict,
+        forced_target=None,
+    ) -> str:
+        atype      = action_def.get("type", "attack")
+        power_rate = action_def.get("power_rate", 1.0)
+        max_hp     = self.enemy_max_hp.get(enemy.id, enemy.hp)
+
+        if atype == "attack":
+            target = forced_target or self._select_target()
+            if target is None:
+                return f"{enemy.name} は様子を見ている…"
+            atk  = self.get_effective_attack(enemy)
+            def_ = self.get_effective_defense(target)
+            if target.id in self._defending:
+                def_ *= 2
+            dmg    = self.calc_damage(int(atk * power_rate), def_)
+            actual = target.take_damage(dmg)
+            if power_rate >= 1.4:
+                label = "強烈な"
+            elif power_rate <= 0.8:
+                label = "弱い"
+            else:
+                label = ""
+            msg = f"{enemy.name} の{label}攻撃！ {target.name} に {actual} のダメージ！"
+            if not target.is_alive():
+                msg += f" {target.name} は倒れた…"
+            return msg
+
+        elif atype == "attack_all":
+            alive_targets = [c for c in self.party if c.is_alive()]
+            if not alive_targets:
+                return f"{enemy.name} は様子を見ている…"
+            atk  = self.get_effective_attack(enemy)
+            msgs = []
+            for t in alive_targets:
+                def_   = self.get_effective_defense(t)
+                if t.id in self._defending:
+                    def_ *= 2
+                dmg    = self.calc_damage(int(atk * power_rate), def_)
+                actual = t.take_damage(dmg)
+                part   = f"{t.name} に {actual}"
+                if not t.is_alive():
+                    part += "(戦闘不能)"
+                msgs.append(part)
+            return f"{enemy.name} の全体攻撃！ " + " / ".join(msgs)
+
+        elif atype == "status":
+            target = forced_target or self._select_target()
+            if target is None:
+                return f"{enemy.name} は様子を見ている…"
+            kind     = action_def.get("kind", "poison")
+            duration = action_def.get("duration", 2)
+            return f"{enemy.name} の特殊行動！ " + self.apply_status(target, kind, duration, action_name)
+
+        elif atype == "status_all":
+            alive_targets = [c for c in self.party if c.is_alive()]
+            kind     = action_def.get("kind", "poison")
+            duration = action_def.get("duration", 2)
+            msgs = [self.apply_status(t, kind, duration, action_name) for t in alive_targets]
+            return f"{enemy.name} の特殊行動！ " + " / ".join(msgs)
+
+        elif atype == "buff":
+            stat     = action_def.get("stat", "defense")
+            amount   = action_def.get("amount", 5)
+            duration = action_def.get("duration", 3)
+            return f"{enemy.name} は力を高めた！ " + self.apply_buff(enemy, stat, amount, duration, action_name)
+
+        elif atype == "heal_self":
+            heal_amount = max(1, int(max_hp * power_rate))
+            old_hp      = enemy.hp
+            enemy.hp    = min(max_hp, enemy.hp + heal_amount)
+            actual      = enemy.hp - old_hp
+            return f"{enemy.name} は自己回復した！ HP が {actual} 回復！"
+
+        return f"{enemy.name} は様子を見ている…"
 
     # ──────────────────────────────────────────────────────
     # アイテム使用

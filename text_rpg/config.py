@@ -197,3 +197,102 @@ MERCHANT_STOCK: list[dict] = [
     {"item_id": 5, "price": 200},  # フェニックスの羽
     {"item_id": 6, "price": 120},  # 活力の薬
 ]
+
+# ─── R-12 敵AI（疑似AI）────────────────────────────────────────
+# 敵名をキーとするルールベースAI行動定義
+# actions.type 一覧:
+#   attack      : 単体攻撃（power_rate で威力倍率）
+#   attack_all  : 全体攻撃（power_rate で威力倍率、省略時 0.7）
+#   status      : 状態異常付与・単体（kind, duration）
+#   status_all  : 状態異常付与・全体（kind, duration）
+#   buff        : 自身へのバフ/デバフ（stat, amount, duration）
+#   heal_self   : 自己回復（max_hp × power_rate）
+ENEMY_AI_ACTIONS: dict[str, dict] = {
+    "default": {
+        "normal_rotation": ["attack", "attack", "attack"],
+        "danger_priority": ["attack"],
+        "actions": {
+            "attack": {"type": "attack"},
+        },
+    },
+    "スライム": {
+        "normal_rotation": ["attack", "attack", "split_atk"],
+        "danger_priority":  ["attack"],
+        "actions": {
+            "attack":    {"type": "attack"},
+            "split_atk": {"type": "attack_all", "power_rate": 0.6},
+        },
+    },
+    "コウモリ": {
+        "normal_rotation": ["attack", "stun_bite", "attack"],
+        "danger_priority":  ["attack"],
+        "actions": {
+            "attack":    {"type": "attack"},
+            "stun_bite": {"type": "status", "kind": "stun", "duration": 1},
+        },
+    },
+    "ゴブリン": {
+        "normal_rotation": ["attack", "attack", "def_down_slash"],
+        "danger_priority":  ["attack"],
+        "actions": {
+            "attack":         {"type": "attack"},
+            "def_down_slash": {"type": "status", "kind": "def_down", "duration": 2},
+        },
+    },
+    "オーク": {
+        "normal_rotation": ["attack", "heavy_blow", "attack"],
+        "danger_priority":  ["attack"],
+        "actions": {
+            "attack":     {"type": "attack"},
+            "heavy_blow": {"type": "attack", "power_rate": 1.5},
+        },
+    },
+    "ドラゴン": {
+        "normal_rotation": ["attack", "breath", "attack", "attack"],
+        "danger_priority":  ["breath", "attack"],
+        "actions": {
+            "attack": {"type": "attack"},
+            "breath": {"type": "attack_all", "power_rate": 0.8},
+        },
+    },
+    "ゴブリンキング": {
+        "normal_rotation": ["attack", "buff_def_self", "attack", "call_minion_atk"],
+        "danger_priority":  ["poison_all", "attack"],
+        "actions": {
+            "attack":          {"type": "attack"},
+            "buff_def_self":   {"type": "buff", "stat": "defense", "amount": 8,  "duration": 3},
+            "call_minion_atk": {"type": "attack_all", "power_rate": 0.5},
+            "poison_all":      {"type": "status_all", "kind": "poison", "duration": 3},
+        },
+    },
+    "オークチーフ": {
+        "normal_rotation": ["attack", "attack", "def_down_slash", "heavy_blow"],
+        "danger_priority":  ["rage", "heavy_blow"],
+        "actions": {
+            "attack":         {"type": "attack"},
+            "heavy_blow":     {"type": "attack",  "power_rate": 1.6},
+            "def_down_slash": {"type": "status",  "kind": "def_down", "duration": 3},
+            "rage":           {"type": "buff",    "stat": "attack",   "amount": 10, "duration": 3},
+        },
+    },
+    "ダークロード": {
+        "normal_rotation": ["attack", "dark_blast", "silence_all", "attack", "buff_atk_self"],
+        "danger_priority":  ["heal_self", "dark_blast", "attack"],
+        "actions": {
+            "attack":        {"type": "attack"},
+            "dark_blast":    {"type": "attack_all",  "power_rate": 0.9},
+            "silence_all":   {"type": "status_all",  "kind": "silence", "duration": 2},
+            "buff_atk_self": {"type": "buff",         "stat": "attack",  "amount": 12, "duration": 3},
+            "heal_self":     {"type": "heal_self",    "power_rate": 0.3},
+        },
+    },
+    "ミミック": {
+        "normal_rotation": ["attack", "spit_coin", "attack"],
+        "danger_priority":  ["bite_hard", "attack"],
+        "actions": {
+            "attack":    {"type": "attack"},
+            "spit_coin": {"type": "attack", "power_rate": 0.7},
+            "bite_hard": {"type": "attack", "power_rate": 1.8},
+        },
+    },
+}

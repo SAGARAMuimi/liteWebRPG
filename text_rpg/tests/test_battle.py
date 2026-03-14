@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from unittest.mock import MagicMock
-from game.battle import BattleEngine
+from game.battle import BattleEngine, EnemyAI
 from models.character import Character
 from models.enemy import Enemy
 from models.skill import Skill
@@ -516,3 +516,165 @@ class TestCooldown:
         # chara1 はCD中だが chara2 はCDなし
         assert engine2.get_skill_cooldown(self.chara, s) == 2
         assert engine2.get_skill_cooldown(chara2, s) == 0
+
+
+# ─── 敵AI テスト ────────────────────────────────────────────
+
+class TestEnemyAI:
+    """R-12 ルールベース敵AI のユニットテスト"""
+
+    def _make_enemy(self, name="スライム", hp=100, attack=10, defense=3):
+        e = make_enemy(name=name, hp=hp, attack=attack, defense=defense)
+        return e
+
+    def _make_party(self, count=2):
+        party = []
+        for i in range(count):
+            c = make_character(name=f"勇者{i+1}", hp=100, attack=15, defense=5)
+            c.id = i + 1
+            party.append(c)
+        return party
+
+    # ── EnemyAI.get_phase ──────────────────────────────────
+    def test_get_phase_normal(self):
+        """HP > 50% なら NORMAL フェーズ"""
+        e = self._make_enemy(hp=60)
+        assert EnemyAI.get_phase(e, max_hp=100) == "NORMAL"
+
+    def test_get_phase_danger_boundary(self):
+        """HP = 50% ちょうどは DANGER フェーズ"""
+        e = self._make_enemy(hp=50)
+        assert EnemyAI.get_phase(e, max_hp=100) == "DANGER"
+
+    def test_get_phase_danger_below(self):
+        """HP < 50% は DANGER フェーズ"""
+        e = self._make_enemy(hp=30)
+        assert EnemyAI.get_phase(e, max_hp=100) == "DANGER"
+
+    # ── EnemyAI.is_win_first ──────────────────────────────
+    def test_is_win_first_false_when_hp_high(self):
+        """全員 HP > 15% なら WIN_FIRST でない"""
+        party = self._make_party()
+        # 全員 HP100/max100 = 100% → WIN_FIRST 不要
+        assert EnemyAI.is_win_first(party) is False
+
+    def test_is_win_first_true_when_low_hp(self):
+        """HP ≤ 15% のキャラがいれば WIN_FIRST"""
+        party = self._make_party()
+        party[0].hp = 10   # 10/100 = 10% ≤ 15%
+        assert EnemyAI.is_win_first(party) is True
+
+    def test_is_win_first_ignores_dead(self):
+        """戦闘不能キャラは WIN_FIRST 判定に含めない"""
+        party = self._make_party()
+        party[0].hp = 0   # 戦闘不能（is_alive = False）
+        party[1].hp = 80  # 80% → WIN_FIRST 不要
+        assert EnemyAI.is_win_first(party) is False
+
+    # ── EnemyAI.select_win_first_target ───────────────────
+    def test_win_first_targets_lowest_hp_ratio(self):
+        """最低HP率のキャラをターゲットに選ぶ"""
+        party = self._make_party()
+        party[0].hp = 30   # 30%
+        party[1].hp = 60   # 60%
+        target = EnemyAI.select_win_first_target(party)
+        assert target.id == party[0].id
+
+    # ── EnemyAI.choose_action ─────────────────────────────
+    def test_choose_action_normal_rotation(self):
+        """NORMAL フェーズはローテーション順に行動"""
+        e = self._make_enemy(name="オーク", hp=100)
+        # オークの normal_rotation = ["attack", "heavy_blow", "attack"]
+        _, def0 = EnemyAI.choose_action(e, "NORMAL", 0)
+        _, def1 = EnemyAI.choose_action(e, "NORMAL", 1)
+        _, def2 = EnemyAI.choose_action(e, "NORMAL", 2)
+        assert def0["type"] == "attack" and def0.get("power_rate", 1.0) == 1.0
+        assert def1["type"] == "attack" and def1.get("power_rate", 1.0) == 1.5
+        assert def2["type"] == "attack" and def2.get("power_rate", 1.0) == 1.0
+
+    def test_choose_action_danger_priority(self):
+        """DANGER フェーズは danger_priority に切り替わる"""
+        e = self._make_enemy(name="ドラゴン", hp=30)
+        # ドラゴンの danger_priority = ["breath", "attack"]
+        name0, _ = EnemyAI.choose_action(e, "DANGER", 0)
+        assert name0 == "breath"
+
+    def test_choose_action_unknown_enemy_uses_default(self):
+        """ENEMY_AI_ACTIONS に存在しない敵名は default ルールを使う"""
+        e = self._make_enemy(name="謎の怪物", hp=100)
+        name, action_def = EnemyAI.choose_action(e, "NORMAL", 0)
+        assert action_def["type"] == "attack"
+
+    def test_choose_action_rotation_wraps(self):
+        """ローテーションが末尾を超えると先頭に戻る"""
+        e = self._make_enemy(name="スライム", hp=100)
+        # normal_rotation length = 3
+        name_0, _ = EnemyAI.choose_action(e, "NORMAL", 0)
+        name_3, _ = EnemyAI.choose_action(e, "NORMAL", 3)
+        assert name_0 == name_3
+
+    # ── _execute_enemy_action / enemy_action ──────────────
+    def test_enemy_attack_deals_damage(self):
+        """enemy_action で敵の通常攻撃がパーティに当たる"""
+        party = self._make_party(1)
+        enemy = self._make_enemy(name="スライム", hp=50, attack=10)
+        engine = BattleEngine(party, [enemy])
+        hp_before = party[0].hp
+        msgs = engine.enemy_action()
+        assert len(msgs) >= 1
+        assert party[0].hp < hp_before
+
+    def test_enemy_rotation_index_increments(self):
+        """enemy_action を呼ぶたびに rotation_idx が増える"""
+        party = self._make_party(1)
+        enemy = self._make_enemy(name="オーク", hp=50)
+        engine = BattleEngine(party, [enemy])
+        engine.enemy_action()
+        assert engine.enemy_rotation_idx[enemy.id] == 1
+        engine.enemy_action()
+        assert engine.enemy_rotation_idx[enemy.id] == 2
+
+    def test_stun_blocks_enemy_action(self):
+        """スタン状態の敵は行動できない（スキップされる）"""
+        party = self._make_party(1)
+        enemy = self._make_enemy(hp=50)
+        engine = BattleEngine(party, [enemy])
+        engine.apply_status(enemy, "stun", 1, "test")
+        hp_before = party[0].hp
+        msgs = engine.enemy_action()
+        assert party[0].hp == hp_before
+        assert any("スタン" in m for m in msgs)
+
+    def test_danger_phase_switches_when_hp_drops(self):
+        """敵 HP が 50% 以下になると DANGER フェーズに切り替わる"""
+        enemy = self._make_enemy(name="ドラゴン", hp=40)  # 40/100 = 40%
+        phase = EnemyAI.get_phase(enemy, max_hp=100)
+        assert phase == "DANGER"
+
+    def test_attack_all_hits_all_alive_party(self):
+        """全体攻撃アクションで全生存パーティメンバーにダメージが入る"""
+        party = self._make_party(3)
+        enemy = self._make_enemy(name="ドラゴン", hp=100, attack=15)
+        engine = BattleEngine(party, [enemy])
+        hp_before = [c.hp for c in party]
+        # ドラゴンのローテーション index=1 で "breath"（attack_all）
+        engine.enemy_rotation_idx[enemy.id] = 1
+        engine.enemy_action()
+        # 全員ダメージを受けているはず
+        for i, c in enumerate(party):
+            assert c.hp < hp_before[i], f"party[{i}] がダメージを受けていない"
+
+    def test_enemy_max_hp_preserved_in_engine(self):
+        """BattleEngine が敵の初期HPを正しく記録する"""
+        enemy = self._make_enemy(hp=80)
+        engine = BattleEngine([make_character()], [enemy])
+        assert engine.enemy_max_hp[enemy.id] == 80
+
+    def test_enemy_max_hp_passed_from_outside(self):
+        """外部から enemy_max_hp を渡すと上書きされず初期値が保たれる"""
+        enemy = self._make_enemy(hp=50)   # 現在HP（ダメージ済み想定）
+        engine = BattleEngine(
+            [make_character()], [enemy],
+            enemy_max_hp={enemy.id: 100},   # 本来の最大HP
+        )
+        assert engine.enemy_max_hp[enemy.id] == 100

@@ -80,6 +80,10 @@ if "show_item_panel" not in st.session_state:
     st.session_state["show_item_panel"] = False
 if "pending_levelups" not in st.session_state:
     st.session_state["pending_levelups"] = []
+if "battle_enemy_max_hp" not in st.session_state:
+    st.session_state["battle_enemy_max_hp"] = {}
+if "battle_enemy_rotation" not in st.session_state:
+    st.session_state["battle_enemy_rotation"] = {}
 
 # 戦闘開始時にインベントリを DB からロード（battle_enemies が初層に設定されたタイミング）
 if not st.session_state["battle_inventory"] and st.session_state.get("battle_enemies"):
@@ -93,6 +97,11 @@ if not st.session_state["battle_inventory"] and st.session_state.get("battle_ene
     ]
 
 _diff_cfg = DIFFICULTY_PRESETS[st.session_state.get("difficulty", "normal")]
+# 戦闘開始時に敵最大HP / ローテーションを初期化（戦闘中は引き継ぐ）
+if enemies and not st.session_state["battle_enemy_max_hp"]:
+    st.session_state["battle_enemy_max_hp"] = {e.id: e.hp for e in enemies}
+if enemies and not st.session_state["battle_enemy_rotation"]:
+    st.session_state["battle_enemy_rotation"] = {e.id: 0 for e in enemies}
 engine = BattleEngine(
     party, enemies,
     heal_mult=_diff_cfg["heal_mult"],
@@ -100,6 +109,8 @@ engine = BattleEngine(
     buffs=st.session_state["battle_buffs"],
     hate=st.session_state["battle_hate"],
     cooldowns=st.session_state["battle_cooldowns"],
+    enemy_max_hp=st.session_state["battle_enemy_max_hp"],
+    enemy_rotation_idx=st.session_state["battle_enemy_rotation"],
 )
 engine.turn = st.session_state["battle_turn"]
 engine._defending = st.session_state["defending_chars"]
@@ -189,6 +200,8 @@ if engine.is_all_enemies_dead():
         st.session_state["battle_buffs"] = {}
         st.session_state["battle_hate"] = {}
         st.session_state["battle_cooldowns"] = {}
+        st.session_state["battle_enemy_max_hp"] = {}
+        st.session_state["battle_enemy_rotation"] = {}
         st.switch_page("pages/2_dungeon.py")
     st.stop()
 
@@ -212,6 +225,8 @@ if engine.is_party_wiped():
         st.session_state["battle_buffs"] = {}
         st.session_state["battle_hate"] = {}
         st.session_state["battle_cooldowns"] = {}
+        st.session_state["battle_enemy_max_hp"] = {}
+        st.session_state["battle_enemy_rotation"] = {}
         st.switch_page("pages/1_character.py")
     st.stop()
 
