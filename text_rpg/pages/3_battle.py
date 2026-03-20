@@ -4,6 +4,7 @@ pages/3_battle.py - 戦闘画面
 
 import sys
 import os
+import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import models  # noqa: F401 - 全テーブルを依存順に Base.metadata に登録
@@ -17,7 +18,7 @@ from game.battle import BattleEngine
 from models.user import User
 from utils.auth import check_login, get_current_user_id
 from utils.helpers import hp_bar, class_display_name
-from config import APP_TITLE, DIFFICULTY_PRESETS, STATUS_AILMENTS, LEVEL_UP_PLANS, CLASS_DEFAULT_LEVELUP_PLAN
+from config import APP_TITLE, DIFFICULTY_PRESETS, STATUS_AILMENTS, LEVEL_UP_PLANS, CLASS_DEFAULT_LEVELUP_PLAN, ALLY_POLICIES, CLASS_DEFAULT_POLICY
 
 st.set_page_config(page_title=f"戦闘 | {APP_TITLE}", page_icon="⚔️", layout="wide")
 check_login()
@@ -84,6 +85,12 @@ if "battle_enemy_max_hp" not in st.session_state:
     st.session_state["battle_enemy_max_hp"] = {}
 if "battle_enemy_rotation" not in st.session_state:
     st.session_state["battle_enemy_rotation"] = {}
+if "auto_battle_enabled" not in st.session_state:
+    st.session_state["auto_battle_enabled"] = False
+if "ally_policies" not in st.session_state:
+    st.session_state["ally_policies"] = {}
+if "auto_turn_wait" not in st.session_state:
+    st.session_state["auto_turn_wait"] = 5
 
 # 戦闘開始時にインベントリを DB からロード（battle_enemies が初層に設定されたタイミング）
 if not st.session_state["battle_inventory"] and st.session_state.get("battle_enemies"):
@@ -288,6 +295,95 @@ alive_enemies = [e for e in enemies if e.is_alive()]
 if not alive_party:
     st.stop()
 
+
+def do_enemy_turn():
+    msgs = engine.enemy_action()
+    st.session_state["battle_log"].extend(msgs)
+    # バフ/デバフのカウントダウン
+    tick_msgs = engine.tick_buffs()
+    if tick_msgs:
+        st.session_state["battle_log"].extend(tick_msgs)
+    # クールダウンのカウントダウン
+    engine.tick_cooldowns()
+    st.session_state["battle_turn"] = engine.turn
+    st.session_state["defending_chars"] = engine._defending
+    # HP を DB に保存
+    with SessionLocal() as db:
+        for chara in party:
+            chara.save(db)
+# 自動行動モード トグル
+auto_mode = st.toggle(
+    "⚙️ 自動行動モード",
+    value=st.session_state["auto_battle_enabled"],
+    key="auto_toggle",
+)
+st.session_state["auto_battle_enabled"] = auto_mode
+# ─── 自動行動パネル（auto_mode ON 時のみ表示） ─────────────────────
+if auto_mode:
+    with st.container(border=True):
+        st.caption("⚙️ 行動方針設定")
+        policy_cols = st.columns(len(alive_party))
+        for _pi, _pc in enumerate(alive_party):
+            with policy_cols[_pi]:
+                _default_pol = CLASS_DEFAULT_POLICY.get(_pc.class_type, "attack")
+                _cur_pol = st.session_state["ally_policies"].get(_pc.id, _default_pol)
+                _pol_keys = list(ALLY_POLICIES.keys())
+                _pol_idx = _pol_keys.index(_cur_pol) if _cur_pol in _pol_keys else 0
+                _chosen = st.selectbox(
+                    _pc.name,
+                    _pol_keys,
+                    index=_pol_idx,
+                    format_func=lambda k: ALLY_POLICIES[k],
+                    key=f"policy_{_pc.id}",
+                )
+                st.session_state["ally_policies"][_pc.id] = _chosen
+        # 待機秒数スライダー
+        st.session_state["auto_turn_wait"] = st.slider(
+            "⏱️ 待機秒数（行動ごと）",
+            min_value=1, max_value=10,
+            value=st.session_state["auto_turn_wait"],
+            step=1,
+            key="wait_slider",
+        )
+
+    if st.button("▶ 全員行動", use_container_width=True, type="primary"):
+        _wait = st.session_state["auto_turn_wait"]
+        _live = st.empty()  # ライブ表示プレースホルダー
+        # ── パーティ行動 ──
+        for _ac in alive_party:
+            _pol = st.session_state["ally_policies"].get(
+                _ac.id, CLASS_DEFAULT_POLICY.get(_ac.class_type, "attack")
+            )
+            with SessionLocal() as db:
+                _skills = Skill.get_for_class(db, _ac.class_type)
+            _msg = engine.ally_auto_action(_ac, _pol, _skills)
+            st.session_state["battle_log"].append(_msg)
+            _live.info(f"🗡️ {_msg}")
+            time.sleep(_wait)
+            if engine.is_all_enemies_dead():
+                break
+        # ── 敵ターン ──
+        if not engine.is_all_enemies_dead():
+            _enemy_msgs = engine.enemy_action()
+            st.session_state["battle_log"].extend(_enemy_msgs)
+            _tick_msgs = engine.tick_buffs()
+            if _tick_msgs:
+                st.session_state["battle_log"].extend(_tick_msgs)
+            engine.tick_cooldowns()
+            st.session_state["battle_turn"] = engine.turn
+            st.session_state["defending_chars"] = engine._defending
+            with SessionLocal() as db:
+                for chara in party:
+                    chara.save(db)
+            with _live.container():
+                for _em in _enemy_msgs:
+                    st.warning(f"👾 {_em}")
+            time.sleep(_wait)
+        st.rerun()
+
+    st.stop()
+
+# 手動行動 UI（auto_mode OFF 時）
 # キャラクター・敵選択 — 同名が並んでも区別できるよう一意なラベルを生成する
 def _unique_labels(objs) -> list[str]:
     # キャラクターは「名前（クラス）」、敵は「名前」をベースラベルにする
@@ -373,21 +469,6 @@ else:
 # ─── 行動ボタン ───────────────────────────────────────────────
 btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
 
-def do_enemy_turn():
-    msgs = engine.enemy_action()
-    st.session_state["battle_log"].extend(msgs)
-    # バフ/デバフのカウントダウン
-    tick_msgs = engine.tick_buffs()
-    if tick_msgs:
-        st.session_state["battle_log"].extend(tick_msgs)
-    # クールダウンのカウントダウン
-    engine.tick_cooldowns()
-    st.session_state["battle_turn"] = engine.turn
-    st.session_state["defending_chars"] = engine._defending
-    # HP を DB に保存
-    with SessionLocal() as db:
-        for chara in party:
-            chara.save(db)
 
 with btn_col1:
     if st.button("⚔️ 攻撃", use_container_width=True):

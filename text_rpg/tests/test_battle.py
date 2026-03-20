@@ -678,3 +678,155 @@ class TestEnemyAI:
             enemy_max_hp={enemy.id: 100},   # 本来の最大HP
         )
         assert engine.enemy_max_hp[enemy.id] == 100
+
+
+# ─── R-13 味方自動行動AI テスト ──────────────────────────────
+class TestAllyAutoAction:
+    """BattleEngine.ally_auto_action() の動作確認"""
+
+    def _make_char(self, name="勇者", class_type="warrior", hp=100, mp=30,
+                   attack=15, defense=8, char_id=1) -> Character:
+        c = Character()
+        c.id = char_id
+        c.name = name
+        c.class_type = class_type
+        c.hp = hp
+        c.max_hp = hp
+        c.mp = mp
+        c.max_mp = mp
+        c.attack = attack
+        c.defense = defense
+        c.level = 1
+        c.exp = 0
+        return c
+
+    def _make_enemy(self, name="スライム", hp=30, attack=5, defense=2) -> Enemy:
+        e = Enemy()
+        e.id = 1
+        e.name = name
+        e.hp = hp
+        e.attack = attack
+        e.defense = defense
+        e.exp_reward = 10
+        e.is_boss = False
+        return e
+
+    def _make_skill(self, name="攻撃スキル", effect_type="attack",
+                    mp_cost=10, power=20, duration=0, target_type="enemy",
+                    skill_id=1) -> Skill:
+        s = Skill()
+        s.id = skill_id
+        s.name = name
+        s.effect_type = effect_type
+        s.mp_cost = mp_cost
+        s.power = power
+        s.cooldown = 0
+        s.duration = duration
+        s.target_type = target_type
+        return s
+
+    def _make_engine(self, party, enemies):
+        return BattleEngine(party, enemies)
+
+    # ── attack ポリシー ──────────────────────────────────────
+    def test_auto_attack_uses_skill(self):
+        """attack ポリシーで攻撃スキルが使用されること"""
+        chara  = self._make_char(mp=30)
+        enemy  = self._make_enemy(hp=50)
+        engine = self._make_engine([chara], [enemy])
+        skills = [self._make_skill("斬撃", "attack", mp_cost=10, power=20)]
+        msg = engine.ally_auto_action(chara, "attack", skills)
+        assert "斬撃" in msg
+        assert chara.mp == 20  # MP 消費
+
+    def test_auto_attack_fallback_to_normal(self):
+        """MP ゼロで攻撃スキルが使えない場合に通常攻撃にフォールバックすること"""
+        chara  = self._make_char(mp=0)
+        enemy  = self._make_enemy(hp=50)
+        engine = self._make_engine([chara], [enemy])
+        skills = [self._make_skill("斬撃", "attack", mp_cost=10)]
+        msg = engine.ally_auto_action(chara, "attack", skills)
+        assert "攻撃" in msg
+        assert "斬撃" not in msg
+
+    # ── heal ポリシー ────────────────────────────────────────
+    def test_auto_heal_cures_critical(self):
+        """HP ≤ 30% のキャラがいるとき heal ポリシーで回復スキルが使われること"""
+        healer  = self._make_char(name="僧侶", class_type="priest", mp=50, char_id=1)
+        wounded = self._make_char(name="戦士", hp=25, char_id=2)  # max_hp=25, HP=25=100% (満タン)
+        # max_hp=100 なのに hp=25 にするためにセット
+        wounded.hp     = 25
+        wounded.max_hp = 100  # 25%
+        enemy  = self._make_enemy()
+        engine = self._make_engine([healer, wounded], [enemy])
+        heal_sk = self._make_skill("ヒール", "heal", mp_cost=10, power=30)
+        msg = engine.ally_auto_action(healer, "heal", [heal_sk])
+        assert "ヒール" in msg
+
+    def test_auto_heal_attacks_when_full(self):
+        """全員 HP ≥ 70% のとき heal ポリシーで攻撃にフォールバックすること"""
+        healer = self._make_char(name="僧侶", class_type="priest", mp=50)
+        enemy  = self._make_enemy(hp=50)
+        engine = self._make_engine([healer], [enemy])
+        # 回復スキルのみ
+        heal_sk   = self._make_skill("ヒール", "heal", mp_cost=10, power=30, skill_id=1)
+        attack_sk = self._make_skill("攻撃", "attack", mp_cost=5, power=10, skill_id=2)
+        msg = engine.ally_auto_action(healer, "heal", [heal_sk, attack_sk])
+        # 全員満タン → 攻撃スキルにフォールバック
+        assert "攻撃" in msg
+
+    def test_auto_heal_cures_status(self):
+        """状態異常保持キャラがいるとき heal ポリシーで cure スキルを優先すること"""
+        healer  = self._make_char(name="僧侶", class_type="priest", mp=50, char_id=1)
+        ill     = self._make_char(name="戦士", char_id=2)
+        enemy   = self._make_enemy()
+        engine  = self._make_engine([healer, ill], [enemy])
+        # ill キャラに毒を付与
+        engine.apply_status(ill, "poison", 3, "test")
+        cure_sk = self._make_skill("キュア", "cure", mp_cost=8, power=0, skill_id=1)
+        heal_sk = self._make_skill("ヒール", "heal", mp_cost=10, power=30, skill_id=2)
+        msg = engine.ally_auto_action(healer, "heal", [cure_sk, heal_sk])
+        assert "キュア" in msg
+
+    # ── defend ポリシー ──────────────────────────────────────
+    def test_auto_defend_uses_taunt(self):
+        """挑発スキルを持つ騎士が defend ポリシーで挑発を使うこと"""
+        knight = self._make_char(name="騎士", class_type="knight", mp=20)
+        enemy  = self._make_enemy()
+        engine = self._make_engine([knight], [enemy])
+        taunt_sk = self._make_skill("挑発", "buff_def", mp_cost=8, power=5,
+                                    duration=3, target_type="self")
+        msg = engine.ally_auto_action(knight, "defend", [taunt_sk])
+        assert "挑発" in msg
+
+    def test_auto_defend_finishes_enemy(self):
+        """止めを刺せる敵がいるとき defend ポリシーで攻撃すること"""
+        chara  = self._make_char(attack=20, mp=30)
+        enemy  = self._make_enemy(hp=1, defense=0)  # あと1撃で倒せる
+        engine = self._make_engine([chara], [enemy])
+        atk_sk = self._make_skill("斬撃", "attack", mp_cost=5, power=10)
+        msg = engine.ally_auto_action(chara, "defend", [atk_sk])
+        # 防御でなく攻撃が選択されるはず
+        assert "防御" not in msg
+
+    # ── 状態異常への対応 ────────────────────────────────────
+    def test_auto_stun_skip(self):
+        """スタン中のキャラが行動スキップされること"""
+        chara  = self._make_char()
+        enemy  = self._make_enemy()
+        engine = self._make_engine([chara], [enemy])
+        engine.apply_status(chara, "stun", 1, "test")
+        msg = engine.ally_auto_action(chara, "attack", [])
+        assert "スタン" in msg
+
+    def test_auto_silence_no_skill(self):
+        """沈黙中のキャラがスキルを使わず通常攻撃にフォールバックすること"""
+        chara  = self._make_char(mp=30)
+        enemy  = self._make_enemy(hp=50)
+        engine = self._make_engine([chara], [enemy])
+        engine.apply_status(chara, "silence", 2, "test")
+        atk_sk = self._make_skill("斬撃", "attack", mp_cost=5, power=10)
+        msg = engine.ally_auto_action(chara, "attack", [atk_sk])
+        # スキルを使わず通常攻撃のはず
+        assert "斬撃" not in msg
+        assert "攻撃" in msg

@@ -87,16 +87,18 @@ def seed_initial_data(db) -> None:
         Skill(name="鎧裂き", class_type="warrior", mp_cost=8,  power=0, effect_type="def_down", target_type="enemy",        duration=3),
     ])
 
-    # アイテムマスタ（6種）
+    # アイテムマスタ（6種）— 明示的 ID を持つため merge() でUPSERT
     from models.item import Item
-    db.add_all([
+    _items = [
         Item(id=1, name="ポーション",       description="HPを30回復する",           effect_type="heal_hp",  power=30, target_type="ally", duration=0, price=50),
         Item(id=2, name="ハイポーション",   description="HPを80回復する",           effect_type="heal_hp",  power=80, target_type="ally", duration=0, price=150),
         Item(id=3, name="エーテル",         description="MPを20回復する",           effect_type="heal_mp",  power=20, target_type="ally", duration=0, price=80),
         Item(id=4, name="万能薬",           description="状態異常を全て回復する",   effect_type="cure",     power=0,  target_type="ally", duration=0, price=100),
         Item(id=5, name="フェニックスの羽", description="戦闘不能を蘇生（HP30%）",  effect_type="revive",   power=30, target_type="ally", duration=0, price=200),
         Item(id=6, name="活力の薬",         description="ATKを3上昇（3ターン）",    effect_type="buff_atk", power=3,  target_type="self", duration=3, price=120),
-    ])
+    ]
+    for _item in _items:
+        db.merge(_item)
 
     db.commit()
 

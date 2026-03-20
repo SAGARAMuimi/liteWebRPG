@@ -296,3 +296,23 @@ ENEMY_AI_ACTIONS: dict[str, dict] = {
         },
     },
 }
+
+# ─── R-13 味方自動行動AI ────────────────────────────────────────
+# ポリシーキー → 表示名
+ALLY_POLICIES: dict[str, str] = {
+    "attack": "⚔️ 攻撃重視",
+    "heal":   "💚 回復優先",
+    "defend": "🛡️ 防御重視",
+}
+
+# クラスごとのデフォルトポリシー（キャラクター作成時の初期値）
+CLASS_DEFAULT_POLICY: dict[str, str] = {
+    "warrior": "attack",
+    "mage":    "attack",
+    "priest":  "heal",
+    "thief":   "attack",
+    "knight":  "defend",
+    "archer":  "attack",
+    "monk":    "attack",
+    "bard":    "heal",
+}

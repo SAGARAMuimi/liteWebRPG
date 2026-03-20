@@ -623,3 +623,147 @@ class BattleEngine:
     def get_total_exp(self) -> int:
         base = sum(e.exp_reward for e in self.enemies if not e.is_alive())
         return max(1, int(base * self.exp_mult))
+
+    # ──────────────────────────────────────────────────────
+    # 味方自動行動AI（R-13）
+    # ──────────────────────────────────────────────────────
+    def ally_auto_action(
+        self,
+        character: "Character",
+        policy: str,
+        skills: list,
+    ) -> str:
+        """
+        指定ポリシーに従ってキャラクターを自動行動させる。
+        policy: "attack" | "heal" | "defend"
+        Returns: 戦闘ログ文字列
+        """
+        if not character.is_alive():
+            return f"{character.name} は戦闘不能のため行動できない。"
+
+        if self.has_status(character, "stun"):
+            return f"{character.name} はスタン状態で行動できない！"
+
+        alive_enemies = [e for e in self.enemies if e.is_alive()]
+        alive_party   = [c for c in self.party if c.is_alive()]
+        silenced      = self.has_status(character, "silence")
+
+        # ── ユーティリティ ─────────────────────────────────
+        def weakest_enemy():
+            return min(alive_enemies, key=lambda e: e.hp) if alive_enemies else None
+
+        def weakest_ally():
+            """HP% 最低の生存味方"""
+            return (
+                min(alive_party, key=lambda c: c.hp / max(1, c.max_hp))
+                if alive_party else character
+            )
+
+        def get_skill(etypes: list, top_power: bool = True):
+            """指定 effect_type のスキルを MP が足りるものから選ぶ"""
+            cands = [
+                s for s in skills
+                if s.effect_type in etypes and character.mp >= s.mp_cost
+            ]
+            if not cands:
+                return None
+            return max(cands, key=lambda s: s.power) if top_power else cands[0]
+
+        # ── 攻撃重視 ───────────────────────────────────────
+        if policy == "attack":
+            target = weakest_enemy()
+            if target is None:
+                return f"{character.name} は攻撃対象がいない。"
+            if not silenced:
+                sk = get_skill(["attack"])
+                if sk:
+                    return self.player_action(character, "skill", target=target, skill=sk)
+            return self.player_action(character, "attack", target=target)
+
+        # ── 回復優先 ───────────────────────────────────────
+        elif policy == "heal":
+            if not silenced:
+                # 瀕死（HP ≤ 30%）のキャラを最優先で回復
+                critical = [
+                    c for c in alive_party
+                    if c.hp / max(1, c.max_hp) <= 0.3
+                ]
+                if critical:
+                    sk = get_skill(["heal"])
+                    if sk:
+                        target_c = min(critical, key=lambda c: c.hp)
+                        return self.player_action(character, "skill", target=target_c, skill=sk)
+                # 状態異常保持キャラを cure
+                ill = [
+                    c for c in alive_party
+                    if any(
+                        b.get("stat") == "status"
+                        for b in self.buffs.get(self._entity_key(c), [])
+                    )
+                ]
+                if ill:
+                    sk = get_skill(["cure"])
+                    if sk:
+                        return self.player_action(character, "skill", target=ill[0], skill=sk)
+                # HP < 70% のキャラを回復
+                hurt = [
+                    c for c in alive_party
+                    if c.hp / max(1, c.max_hp) < 0.7
+                ]
+                if hurt:
+                    sk = get_skill(["heal"])
+                    if sk:
+                        target_h = min(hurt, key=lambda c: c.hp / max(1, c.max_hp))
+                        return self.player_action(character, "skill", target=target_h, skill=sk)
+            # フォールバック: 攻撃
+            target = weakest_enemy()
+            if target is None:
+                return f"{character.name} は行動対象がいない。"
+            if not silenced:
+                sk = get_skill(["attack"])
+                if sk:
+                    return self.player_action(character, "skill", target=target, skill=sk)
+            return self.player_action(character, "attack", target=target)
+
+        # ── 防御重視 ───────────────────────────────────────
+        elif policy == "defend":
+            if not silenced:
+                # 挑発スキル（未適用ならまず使う）
+                taunt_sk = next(
+                    (s for s in skills if s.name == "挑発" and character.mp >= s.mp_cost),
+                    None,
+                )
+                if taunt_sk and not any(
+                    b.get("taunt")
+                    for b in self.buffs.get(self._entity_key(character), [])
+                ):
+                    return self.player_action(character, "skill", target=character, skill=taunt_sk)
+                # 防御バフ（未適用のもの）
+                def_sk = get_skill(["buff_def"])
+                if def_sk:
+                    already = any(
+                        b.get("source") == def_sk.name
+                        for b in self.buffs.get(self._entity_key(character), [])
+                    )
+                    if not already:
+                        return self.player_action(character, "skill", target=character, skill=def_sk)
+                # 止めを刺せる敵がいれば攻撃
+                atk_val = self.get_effective_attack(character)
+                one_shot = [
+                    e for e in alive_enemies
+                    if e.hp <= max(1, atk_val - self.get_effective_defense(e))
+                ]
+                if one_shot:
+                    target = min(one_shot, key=lambda e: e.hp)
+                    sk = get_skill(["attack"])
+                    if sk:
+                        return self.player_action(character, "skill", target=target, skill=sk)
+                    return self.player_action(character, "attack", target=target)
+            # すべて不該当 → 防御行動
+            return self.player_action(character, "defend")
+
+        # 不明なポリシー → 通常攻撃フォールバック
+        target = weakest_enemy()
+        if target is None:
+            return f"{character.name} は行動対象がいない。"
+        return self.player_action(character, "attack", target=target)
