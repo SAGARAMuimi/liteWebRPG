@@ -39,6 +39,19 @@ def check_login() -> None:
         st.stop()
 
 
+def check_admin() -> None:
+    """管理者以外をブロックしてページを停止する"""
+    check_login()
+    user_id = st.session_state.get("user_id")
+    from models.database import SessionLocal
+    from models.user import User
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user or not getattr(user, "is_admin", 0):
+            st.error("🚫 このページは管理者専用です。")
+            st.stop()
+
+
 def get_current_user_id() -> int:
     return st.session_state["user_id"]
 

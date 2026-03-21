@@ -385,3 +385,33 @@ META_TITLES: dict[str, dict] = {
     "perseverance":    {"label": "💪 不屈の意志",     "desc": "全滅を経験した"},
     "meta_shopper":    {"label": "🛒 強化の探求者",   "desc": "メタショップで初めて強化した"},
 }
+
+# ── FEEDBACK 不具合報告・改善要望 ─────────────────────────────────────
+FEEDBACK_CATEGORIES: dict[str, dict] = {
+    "bug":     {"label": "🐛 不具合",   "has_severity": True},
+    "request": {"label": "💡 改善要望", "has_severity": False},
+    "other":   {"label": "📝 その他",   "has_severity": False},
+}
+FEEDBACK_SEVERITIES: dict[str, str] = {
+    "low":      "低",
+    "normal":   "普通",
+    "high":     "高",
+    "critical": "致命的",
+}
+FEEDBACK_STATUSES: dict[str, str] = {
+    "open":        "🔴 未対応",
+    "in_progress": "🟡 対応中",
+    "resolved":    "🟢 解決済",
+    "closed":      "⚫ クローズ",
+}
+FEEDBACK_PAGE_LABELS: dict[str, str] = {
+    "1_character": "キャラクター管理",
+    "2_dungeon":   "ダンジョン探索",
+    "3_battle":    "戦闘",
+    "4_town":      "町",
+    "other":       "その他・不明",
+}
+FEEDBACK_MAX_BODY_LENGTH: int   = 2000
+FEEDBACK_DAILY_LIMIT: int       = 10
+FEEDBACK_DUPLICATE_MINUTES: int = 5
+# FEEDBACK_SESSION_LIMIT は匿名送信解禁時に追加予定

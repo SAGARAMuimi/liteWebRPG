@@ -8,6 +8,7 @@ from models.skill import Skill        # 、5位: skills
 from models.item import Item          # 、6位: items
 from models.inventory import Inventory  # 、7位: inventories（users + items に依存）
 from models.equipment import Equipment, CharacterEquipment, CharacterInventory  # 、8位: equipments / character_equipments / character_inventories
+from models.feedback import Feedback  # 、9位: feedbacks（users に依存）
 
 __all__ = [
     "User",
@@ -22,4 +23,5 @@ __all__ = [
     "Equipment",
     "CharacterEquipment",
     "CharacterInventory",
+    "Feedback",
 ]

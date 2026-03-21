@@ -29,6 +29,10 @@ class User(Base):
     meta_upgrade_ranks: Mapped[str] = mapped_column(
         String(512), default="{}", nullable=False, server_default="'{}'"
     )
+    # ── FEEDBACK 不具合報告・改善要望 ──────────────────────
+    is_admin: Mapped[int] = mapped_column(
+        default=0, nullable=False, server_default="0"
+    )
 
     # ──────────────────────────────────────────────────────
     def get_titles_list(self) -> list[str]:

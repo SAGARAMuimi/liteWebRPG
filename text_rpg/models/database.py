@@ -325,3 +325,32 @@ def migrate_db() -> None:
             conn.commit()
         except Exception:
             conn.rollback()
+
+        # ── FEEDBACK 不具合報告・改善要望 ─────────────────────────────────────
+
+        # users テーブルに管理者フラグを追加（既存 DB 対応）
+        try:
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        # feedbacks テーブルを作成（既存 DB 対応）
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS feedbacks (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id      INTEGER REFERENCES users(id),
+                category     VARCHAR(16)  NOT NULL,
+                title        VARCHAR(128) NOT NULL,
+                body         TEXT         NOT NULL,
+                page_context VARCHAR(64)  NOT NULL DEFAULT '',
+                severity     VARCHAR(16)  NOT NULL DEFAULT 'normal',
+                status       VARCHAR(16)  NOT NULL DEFAULT 'open',
+                admin_note   TEXT         NOT NULL DEFAULT '',
+                created_at   DATETIME     NOT NULL,
+                updated_at   DATETIME     NOT NULL
+            )
+        """))
+        conn.commit()
