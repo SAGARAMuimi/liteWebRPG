@@ -106,6 +106,21 @@ PARTY_SIZE: int = 4
 # ─── UI設定 ───────────────────────────────────────────────
 APP_TITLE: str = "⚔️ liteWebRPG"
 
+# ─── 運営者・プライバシー（個人運用向け） ─────────────────────────────
+# 表示名（例: "運営者" やハンドルネーム）
+OPERATOR_NAME: str = os.getenv("OPERATOR_NAME", "運営者")
+
+# 問い合わせ方法（例: "you@example.com" / "X: @your_handle" / 空文字で非表示）
+OPERATOR_CONTACT: str = os.getenv("OPERATOR_CONTACT", "")
+
+# 問い合わせ先（個別設定）: 値があるものだけ画面に表示される
+OPERATOR_CONTACT_EMAIL: str = os.getenv("OPERATOR_CONTACT_EMAIL", "")
+OPERATOR_CONTACT_X: str = os.getenv("OPERATOR_CONTACT_X", "")  # 例: "your_id" または "@your_id"
+OPERATOR_CONTACT_DISCORD: str = os.getenv("OPERATOR_CONTACT_DISCORD", "")
+
+# フィードバック/問い合わせ情報の保存期間（日）
+FEEDBACK_RETENTION_DAYS: int = int(os.getenv("FEEDBACK_RETENTION_DAYS", "365"))
+
 # ─── 難易度設定 ────────────────────────────────────────────
 # 各倍率の意味:
 #   enemy_hp_mult  : 敵の最大HPへの倍率

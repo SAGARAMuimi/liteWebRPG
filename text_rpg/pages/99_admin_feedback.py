@@ -90,6 +90,9 @@ else:
             info_col2.caption(f"📍 ページ: {page_label}")
             info_col3.caption(f"⚠️ 深刻度: {sev_label}")
 
+            if getattr(fb, "contact_email", None):
+                st.caption(f"📧 連絡先メール: {fb.contact_email}")
+
             st.write(fb.body)
             st.caption(
                 f"作成: {fb.created_at.strftime('%Y-%m-%d %H:%M')} UTC  "

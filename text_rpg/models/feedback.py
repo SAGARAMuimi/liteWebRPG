@@ -3,6 +3,7 @@ models/feedback.py - 不具合報告・改善要望モデル
 """
 from __future__ import annotations
 from datetime import datetime, timedelta
+import re
 from sqlalchemy import String, Text, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 from models.database import Base
@@ -17,12 +18,15 @@ class Feedback(Base):
     category    : Mapped[str]       = mapped_column(String(16),  nullable=False)
     title       : Mapped[str]       = mapped_column(String(128), nullable=False)
     body        : Mapped[str]       = mapped_column(Text,        nullable=False)
+    contact_email: Mapped[str | None] = mapped_column(String(254), nullable=True)
     page_context: Mapped[str]       = mapped_column(String(64),  nullable=False, server_default="''")
     severity    : Mapped[str]       = mapped_column(String(16),  nullable=False, server_default="'normal'")
     status      : Mapped[str]       = mapped_column(String(16),  nullable=False, server_default="'open'")
     admin_note  : Mapped[str]       = mapped_column(Text,        nullable=False, server_default="''")
     created_at  : Mapped[datetime]  = mapped_column(DateTime,    nullable=False)
     updated_at  : Mapped[datetime]  = mapped_column(DateTime,    nullable=False)
+
+    _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
     # ─────────────────────────────────────────────────────────────────────────
     @staticmethod
@@ -35,17 +39,31 @@ class Feedback(Base):
         user_id: int | None = None,
         page_context: str = "",
         severity: str = "normal",
+        contact_email: str | None = None,
     ) -> "Feedback":
         """フィードバックを作成して返す。body が上限超えの場合 ValueError を送出する。"""
         from config import FEEDBACK_MAX_BODY_LENGTH
         if len(body) > FEEDBACK_MAX_BODY_LENGTH:
             raise ValueError(f"body は {FEEDBACK_MAX_BODY_LENGTH} 文字以内にしてください")
+
+        email_norm: str | None = None
+        if contact_email is not None:
+            email_norm = contact_email.strip()
+            if email_norm == "":
+                email_norm = None
+        if email_norm is not None:
+            if len(email_norm) > 254:
+                raise ValueError("メールアドレスが長すぎます")
+            if not Feedback._EMAIL_RE.match(email_norm):
+                raise ValueError("メールアドレスの形式が正しくありません")
+
         now = datetime.utcnow()
         fb = Feedback(
             user_id=user_id,
             category=category,
             title=title.strip(),
             body=body.strip(),
+            contact_email=email_norm,
             page_context=page_context,
             severity=severity if category == "bug" else "normal",
             status="open",

@@ -33,6 +33,7 @@ if st.session_state.get("user_id"):
 # ─── タイトル ───────────────────────────────────────────────
 st.title(APP_TITLE)
 st.caption("Python + Streamlit で作ったテキストRPG")
+st.page_link("pages/6_privacy.py", label="🔒 プライバシー / 取扱い")
 st.divider()
 
 # ─── タブ切り替え ──────────────────────────────────────────

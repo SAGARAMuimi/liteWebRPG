@@ -345,6 +345,7 @@ def migrate_db() -> None:
                 category     VARCHAR(16)  NOT NULL,
                 title        VARCHAR(128) NOT NULL,
                 body         TEXT         NOT NULL,
+                contact_email VARCHAR(254),
                 page_context VARCHAR(64)  NOT NULL DEFAULT '',
                 severity     VARCHAR(16)  NOT NULL DEFAULT 'normal',
                 status       VARCHAR(16)  NOT NULL DEFAULT 'open',
@@ -354,3 +355,12 @@ def migrate_db() -> None:
             )
         """))
         conn.commit()
+
+        # feedbacks テーブルに contact_email カラム追加（既存 DB 対応）
+        try:
+            conn.execute(text(
+                "ALTER TABLE feedbacks ADD COLUMN contact_email VARCHAR(254)"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()

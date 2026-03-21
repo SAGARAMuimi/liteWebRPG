@@ -1,6 +1,7 @@
 """
 pages/5_feedback.py - 不具合報告・改善要望フォーム（プレイヤー向け）
 """
+import re
 import streamlit as st
 from models.database import SessionLocal
 from models.feedback import Feedback
@@ -64,16 +65,57 @@ body = st.text_area(
 body_len = len(body)
 st.caption(f"{body_len} / {FEEDBACK_MAX_BODY_LENGTH} 文字")
 
+# ── 連絡先（任意） ──────────────────────────────────────────────────────
+st.subheader("📧 連絡先（任意）")
+contact_email = st.text_input(
+    "メールアドレス（任意）",
+    placeholder="返信が必要な場合のみ使用します（例: you@example.com）",
+    help="任意入力です。本文には個人情報やSNSアカウント等を書かないでください。",
+)
+
+# ── 注意事項（免責） ────────────────────────────────────────────────────
+st.subheader("⚠️ 送信前の注意事項（免責）")
+with st.expander("内容を表示", expanded=False):
+    st.markdown(
+        """
+本サービスは個人が運営しています。いただいたフィードバックは参考にしますが、回答・修正・機能追加・個別対応をお約束するものではありません。
+
+- 本フォームは緊急連絡手段ではありません。
+- 本文には、氏名・住所・電話番号・パスワード等の個人情報、第三者の個人情報、機密情報を記載しないでください。
+- 本文にSNSアカウント等の連絡先を記載されても、個別連絡の希望に必ずしもお応えできません（記載内容は必要に応じて削除・非表示等を行うことがあります）。
+- メールアドレス（任意入力）は、当該フィードバックへの連絡が必要と判断した場合に限り利用します。
+- 禁止事項（誹謗中傷、差別、わいせつ表現、権利侵害、スパム等）に該当する投稿は削除等を行うことがあります。
+
+本フォームの利用またはフィードバックへの未対応・対応遅延等により生じた損害について、運営者は故意または重過失がある場合を除き責任を負いません。
+（強行法規により免責が制限される場合は、その範囲で適用されます。）
+"""
+    )
+
+st.page_link("pages/6_privacy.py", label="🔒 プライバシー / 取扱い（詳細）")
+
+agree = st.checkbox("上記の注意事項（免責）に同意の上、送信します。", value=False)
+
 # ── 送信ボタン ────────────────────────────────────────────────────────────
 if st.button("📨 送信する", type="primary"):
     # ── バリデーション ────────────────────────────────────────────────────
     errors: list[str] = []
+    if not agree:
+        errors.append("注意事項（免責）への同意が必要です。")
     if not title.strip():
         errors.append("タイトルを入力してください。")
     if not body.strip():
         errors.append("詳細を入力してください。")
     if body_len > FEEDBACK_MAX_BODY_LENGTH:
         errors.append(f"詳細は {FEEDBACK_MAX_BODY_LENGTH} 文字以内にしてください。")
+
+    email_norm = contact_email.strip() if contact_email else ""
+    if email_norm:
+        if len(email_norm) > 254:
+            errors.append("メールアドレスが長すぎます（254文字以内）。")
+        else:
+            email_re = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+            if not email_re.match(email_norm):
+                errors.append("メールアドレスの形式が正しくありません。")
 
     if errors:
         for msg in errors:
@@ -107,6 +149,7 @@ if st.button("📨 送信する", type="primary"):
                             user_id=user_id,
                             page_context=page_context,
                             severity=severity,
+                            contact_email=email_norm or None,
                         )
                         st.success("✅ フィードバックを送信しました。ありがとうございます！")
                         st.info(f"本日の送信数: {today_count + 1} / {FEEDBACK_DAILY_LIMIT}")
