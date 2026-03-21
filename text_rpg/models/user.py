@@ -3,6 +3,7 @@ models/user.py - User モデル
 """
 
 from __future__ import annotations
+import json
 from datetime import datetime
 import bcrypt
 from sqlalchemy import String, DateTime
@@ -20,6 +21,28 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )
+    # ── R-15 メタ進行 ──────────────────────────────────────────
+    meta_gold: Mapped[int] = mapped_column(default=0, nullable=False, server_default="0")
+    meta_titles: Mapped[str] = mapped_column(
+        String(512), default="", nullable=False, server_default="''"
+    )
+    meta_upgrade_ranks: Mapped[str] = mapped_column(
+        String(512), default="{}", nullable=False, server_default="'{}'"
+    )
+
+    # ──────────────────────────────────────────────────────
+    def get_titles_list(self) -> list[str]:
+        """獲得済み称号キーのリストを返す"""
+        if not self.meta_titles:
+            return []
+        return [t for t in self.meta_titles.split(",") if t]
+
+    def get_upgrade_ranks(self) -> dict[str, int]:
+        """メタアップグレードのランク辞書を返す"""
+        try:
+            return json.loads(self.meta_upgrade_ranks or "{}")
+        except (json.JSONDecodeError, TypeError):
+            return {}
 
     # ──────────────────────────────────────────────────────
     @staticmethod
@@ -47,6 +70,73 @@ class User(Base):
         db.commit()
         return True
 
+    # ── R-15 メタ進行 ──────────────────────────────────────────
+    @staticmethod
+    def add_meta_gold(db: Session, user_id: int, amount: int) -> int:
+        """メタGOLDを加算して新しいメタGOLD残高を返す"""
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            user.meta_gold = max(0, user.meta_gold + amount)
+            db.commit()
+        return user.meta_gold if user else 0
+
+    @staticmethod
+    def add_meta_title(db: Session, user_id: int, title_key: str) -> bool:
+        """称号を追加する。初めて取得した場合 True を返す"""
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return False
+        titles = user.get_titles_list()
+        if title_key in titles:
+            return False
+        titles.append(title_key)
+        user.meta_titles = ",".join(titles)
+        db.commit()
+        return True
+
+    @staticmethod
+    def upgrade_meta(db: Session, user_id: int, upgrade_key: str) -> bool:
+        """
+        メタアップグレードを1ランク上げる（メタGOLDを消費）。
+        成功したら True を返す。
+        """
+        from config import META_UPGRADES
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return False
+        upgrade_def = META_UPGRADES.get(upgrade_key)
+        if not upgrade_def:
+            return False
+        ranks = user.get_upgrade_ranks()
+        current_rank = ranks.get(upgrade_key, 0)
+        max_rank = len(upgrade_def["costs"])
+        if current_rank >= max_rank:
+            return False  # 上限
+        cost = upgrade_def["costs"][current_rank]
+        if user.meta_gold < cost:
+            return False  # メタGOLD不足
+        user.meta_gold -= cost
+        ranks[upgrade_key] = current_rank + 1
+        user.meta_upgrade_ranks = json.dumps(ranks)
+        db.commit()
+        return True
+
+    @staticmethod
+    def get_meta_bonus(db: Session, user_id: int, upgrade_key: str) -> int:
+        """現在のメタアップグレードのボーナス値を返す（未取得は 0）"""
+        from config import META_UPGRADES
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return 0
+        upgrade_def = META_UPGRADES.get(upgrade_key)
+        if not upgrade_def:
+            return 0
+        rank = user.get_upgrade_ranks().get(upgrade_key, 0)
+        if rank == 0:
+            return 0
+        return upgrade_def["bonuses"][rank - 1]
+
+    # ──────────────────────────────────────────────────────
     @staticmethod
     def create(db: Session, name: str, password: str) -> "User":
         hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()

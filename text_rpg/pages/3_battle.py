@@ -18,7 +18,7 @@ from game.battle import BattleEngine
 from models.user import User
 from utils.auth import check_login, get_current_user_id
 from utils.helpers import hp_bar, class_display_name
-from config import APP_TITLE, DIFFICULTY_PRESETS, STATUS_AILMENTS, LEVEL_UP_PLANS, CLASS_DEFAULT_LEVELUP_PLAN, ALLY_POLICIES, CLASS_DEFAULT_POLICY, CLASS_INTELLIGENCE
+from config import APP_TITLE, DIFFICULTY_PRESETS, STATUS_AILMENTS, LEVEL_UP_PLANS, CLASS_DEFAULT_LEVELUP_PLAN, ALLY_POLICIES, CLASS_DEFAULT_POLICY, CLASS_INTELLIGENCE, META_GOLD_KEEP_RATE
 
 st.set_page_config(page_title=f"戦闘 | {APP_TITLE}", page_icon="⚔️", layout="wide")
 check_login()
@@ -104,6 +104,10 @@ if not st.session_state["battle_inventory"] and st.session_state.get("battle_ene
     ]
 
 _diff_cfg = DIFFICULTY_PRESETS[st.session_state.get("difficulty", "normal")]
+# メタアップグレードボーナスを取得
+with SessionLocal() as _meta_db:
+    _meta_exp_bonus  = User.get_meta_bonus(_meta_db, user_id, "exp_bonus")
+    _meta_heal_bonus = User.get_meta_bonus(_meta_db, user_id, "heal_bonus")
 # 戦闘開始時に敵最大HP / ローテーションを初期化（戦闘中は引き継ぐ）
 if enemies and not st.session_state["battle_enemy_max_hp"]:
     st.session_state["battle_enemy_max_hp"] = {e.id: e.hp for e in enemies}
@@ -111,8 +115,8 @@ if enemies and not st.session_state["battle_enemy_rotation"]:
     st.session_state["battle_enemy_rotation"] = {e.id: 0 for e in enemies}
 engine = BattleEngine(
     party, enemies,
-    heal_mult=_diff_cfg["heal_mult"],
-    exp_mult=_diff_cfg["exp_mult"],
+    heal_mult=_diff_cfg["heal_mult"] * (1 + _meta_heal_bonus / 100),
+    exp_mult=_diff_cfg["exp_mult"]   * (1 + _meta_exp_bonus  / 100),
     buffs=st.session_state["battle_buffs"],
     hate=st.session_state["battle_hate"],
     cooldowns=st.session_state["battle_cooldowns"],
@@ -150,6 +154,7 @@ if engine.is_all_enemies_dead():
                             "new_level":  chara.level,
                         })
             User.add_gold(db, user_id, total_gold)
+            User.add_meta_title(db, user_id, "first_clear")
         st.session_state["battle_result"] = "win"
         st.session_state["battle_exp"]    = total_exp
         st.session_state["battle_gold"]   = total_gold
@@ -220,7 +225,18 @@ if engine.is_party_wiped():
             for chara in party:
                 chara.hp = 1
                 chara.save(db)
+            _normal_gold = User.get_gold(db, user_id)
+            _meta_add = int(_normal_gold * META_GOLD_KEEP_RATE)
+            if _meta_add > 0:
+                User.add_meta_gold(db, user_id, _meta_add)
+            User.add_meta_title(db, user_id, "perseverance")
         st.session_state["battle_result"] = "lose"
+        st.session_state["wipe_meta_gold"] = _meta_add
+    if st.session_state.get("wipe_meta_gold", 0) > 0:
+        st.info(
+            f"💰 メタGOLD +{st.session_state['wipe_meta_gold']}G 獲得！"
+            f"（持ち込みGOLDの{int(META_GOLD_KEEP_RATE * 100)}%を永久保存）"
+        )
     if st.button("キャラクター管理へ戻る"):
         st.session_state["battle_enemies"] = []
         st.session_state["battle_turn"] = 1
@@ -234,6 +250,7 @@ if engine.is_party_wiped():
         st.session_state["battle_cooldowns"] = {}
         st.session_state["battle_enemy_max_hp"] = {}
         st.session_state["battle_enemy_rotation"] = {}
+        st.session_state["wipe_meta_gold"] = 0
         st.switch_page("pages/1_character.py")
     st.stop()
 

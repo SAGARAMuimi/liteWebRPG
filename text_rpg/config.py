@@ -348,3 +348,40 @@ WIN_FIRST_THRESHOLDS: dict[int, float] = {
     2: 0.15,   # 標準：HP15%以下
     3: 0.25,   # 鋭敏：HP25%以下のキャラも積極的に狙う
 }
+# ─── R-15 メタ進行（恒久解放）──────────────────────────────────────────────
+# 全滅時に通常ゴールドの何割をメタGOLDに変換するか
+META_GOLD_KEEP_RATE: float = 0.30
+
+# メタアップグレード定義
+# costs[rank-1]  = ランクを上げるために必要なメタGOLD
+# bonuses[rank-1] = そのランクで得られるボーナス値
+META_UPGRADES: dict[str, dict] = {
+    "start_gold": {
+        "label":   "💰 開始資金",
+        "desc":    "ダンジョン突入時の所持金 +{bonus}G",
+        "costs":   [30,  60, 100, 150, 200],
+        "bonuses": [50, 100, 160, 230, 300],
+    },
+    "exp_bonus": {
+        "label":   "⭐ EXP強化",
+        "desc":    "獲得EXP +{bonus}%",
+        "costs":   [50, 100, 180],
+        "bonuses": [10,  20,  35],
+    },
+    "heal_bonus": {
+        "label":   "💊 回復強化",
+        "desc":    "回復スキル効果 +{bonus}%",
+        "costs":   [60, 120, 200],
+        "bonuses": [10,  20,  35],
+    },
+}
+
+# 称号（実績）定義
+META_TITLES: dict[str, dict] = {
+    "first_clear":     {"label": "⚔️ 初陣の勝者",    "desc": "初めて戦闘に勝利した"},
+    "floor2":          {"label": "🗺️ 探検家",        "desc": "2Fに到達した"},
+    "floor3":          {"label": "🏔️ 深淵の挑戦者",  "desc": "3Fに到達した"},
+    "dungeon_cleared": {"label": "👑 ダンジョン征服者", "desc": "ダンジョンをクリアした"},
+    "perseverance":    {"label": "💪 不屈の意志",     "desc": "全滅を経験した"},
+    "meta_shopper":    {"label": "🛒 強化の探求者",   "desc": "メタショップで初めて強化した"},
+}

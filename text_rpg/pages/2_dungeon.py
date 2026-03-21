@@ -165,6 +165,12 @@ with col1:
         st.session_state["dungeon_log"].append(f"🚪 {current_floor}F - 部屋{room} に入った。")
 
         with SessionLocal() as db:
+            # R-15: 初入室時に開始資金ボーナスを付与
+            if room == 1:
+                _start_bonus = User.get_meta_bonus(db, user_id, "start_gold")
+                if _start_bonus > 0:
+                    User.add_gold(db, user_id, _start_bonus)
+                    st.session_state["dungeon_log"].append(f"💰 開始資金ボーナス +{_start_bonus}G！")
             _dungeon  = Dungeon.get_by_id(db, dungeon_id)
             _progress = DungeonProgress.get_or_create(db, user_id, dungeon_id)
             mgr = DungeonManager(db, _dungeon, _progress)
@@ -349,6 +355,15 @@ if result == "win":
             _progress = DungeonProgress.get_or_create(db, user_id, dungeon_id)
             mgr = DungeonManager(db, _dungeon, _progress)
             all_clear = mgr.advance_to_next_floor()
+            # R-15: フロア到達称号・ダンジョンクリア称号
+            if all_clear:
+                User.add_meta_title(db, user_id, "dungeon_cleared")
+            else:
+                _nf = _progress.current_floor
+                if _nf == 2:
+                    User.add_meta_title(db, user_id, "floor2")
+                elif _nf == 3:
+                    User.add_meta_title(db, user_id, "floor3")
         st.session_state["current_room"] = 0
         if all_clear:
             st.session_state["dungeon_cleared"] = True

@@ -298,3 +298,30 @@ def migrate_db() -> None:
             conn.commit()
         except Exception:
             conn.rollback()
+
+        # ── R-15 メタ進行（恒久解放）──────────────────────────────────────
+
+        # users テーブルにメタ進行用カラムを追加（既存 DB 対応）
+        try:
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN meta_gold INTEGER NOT NULL DEFAULT 0"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        try:
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN meta_titles VARCHAR(512) NOT NULL DEFAULT ''"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        try:
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN meta_upgrade_ranks VARCHAR(512) NOT NULL DEFAULT '{}'"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()

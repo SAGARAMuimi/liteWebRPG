@@ -431,3 +431,74 @@ class TestLevelUpPlans:
         chara.intelligence = 10
         chara.apply_growth(db, "support", times=1)
         assert chara.intelligence == 10  # クランプ済み
+
+
+class TestMetaProgression:
+    """R-15 メタ進行（恒久解放）のテスト"""
+
+    def test_add_meta_gold_accumulates(self, db):
+        """add_meta_gold を複数回呼ぶと累積されること"""
+        user = User.create(db, "meta_acc", "pass")
+        User.add_meta_gold(db, user.id, 100)
+        User.add_meta_gold(db, user.id, 50)
+        fresh = db.query(User).filter(User.id == user.id).first()
+        assert fresh.meta_gold == 150
+
+    def test_add_meta_title_returns_true_first_time(self, db):
+        """初めて称号を追加すると True を返すこと"""
+        user = User.create(db, "title_new", "pass")
+        result = User.add_meta_title(db, user.id, "first_clear")
+        assert result is True
+
+    def test_add_meta_title_no_duplicate(self, db):
+        """同じ称号を 2 回追加すると 2 回目は False を返し重複しないこと"""
+        user = User.create(db, "title_dup", "pass")
+        User.add_meta_title(db, user.id, "perseverance")
+        result = User.add_meta_title(db, user.id, "perseverance")
+        assert result is False
+        fresh = db.query(User).filter(User.id == user.id).first()
+        assert fresh.get_titles_list().count("perseverance") == 1
+
+    def test_upgrade_meta_spends_meta_gold(self, db):
+        """upgrade_meta が成功すると meta_gold が cost 分減少しランクが上がること"""
+        user = User.create(db, "meta_buy", "pass")
+        User.add_meta_gold(db, user.id, 200)
+        ok = User.upgrade_meta(db, user.id, "exp_bonus")  # cost[0] = 50
+        assert ok is True
+        fresh = db.query(User).filter(User.id == user.id).first()
+        assert fresh.meta_gold == 150
+        assert fresh.get_upgrade_ranks().get("exp_bonus") == 1
+
+    def test_upgrade_meta_fails_if_insufficient_gold(self, db):
+        """meta_gold が不足している場合は upgrade_meta が False を返すこと"""
+        user = User.create(db, "meta_poor", "pass")
+        User.add_meta_gold(db, user.id, 10)  # exp_bonus cost = 50
+        ok = User.upgrade_meta(db, user.id, "exp_bonus")
+        assert ok is False
+        fresh = db.query(User).filter(User.id == user.id).first()
+        assert fresh.meta_gold == 10  # 消費されていない
+
+    def test_upgrade_meta_at_max_rank_returns_false(self, db):
+        """最大ランクに達している場合は upgrade_meta が False を返すこと"""
+        user = User.create(db, "meta_max", "pass")
+        # heal_bonus は 3 ランクまで（cost: 60, 120, 200）
+        User.add_meta_gold(db, user.id, 1000)
+        User.upgrade_meta(db, user.id, "heal_bonus")  # rank 1
+        User.upgrade_meta(db, user.id, "heal_bonus")  # rank 2
+        User.upgrade_meta(db, user.id, "heal_bonus")  # rank 3 (max)
+        ok = User.upgrade_meta(db, user.id, "heal_bonus")  # 上限超え
+        assert ok is False
+
+    def test_get_meta_bonus_returns_correct_value(self, db):
+        """rank 1 の start_gold ボーナスが 50 であること"""
+        user = User.create(db, "meta_bonus", "pass")
+        User.add_meta_gold(db, user.id, 200)
+        User.upgrade_meta(db, user.id, "start_gold")  # rank 1, bonus = 50
+        bonus = User.get_meta_bonus(db, user.id, "start_gold")
+        assert bonus == 50
+
+    def test_get_meta_bonus_zero_if_no_rank(self, db):
+        """アップグレードしていない場合のボーナスは 0 であること"""
+        user = User.create(db, "meta_zero", "pass")
+        bonus = User.get_meta_bonus(db, user.id, "exp_bonus")
+        assert bonus == 0
