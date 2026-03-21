@@ -29,6 +29,33 @@ _STATUS_NAMES: dict[str, str] = {
 }
 
 
+# ─── 味方AI 知性値補助関数（Section 8）────────────────────────────────────
+def calc_heal_threshold(intelligence: int, key: str) -> float:
+    """
+    知性値（1〜10）から回復しきい値を線形補間して返す。
+    key: "critical" | "hurt"
+    - intelligence=1: critical=15% / hurt=45%
+    - intelligence=10: critical=50% / hurt=85%
+    """
+    BASES: dict[str, float] = {"critical": 0.15, "hurt": 0.45}
+    MAXES: dict[str, float] = {"critical": 0.50, "hurt": 0.85}
+    ratio = (intelligence - 1) / 9
+    return BASES[key] + (MAXES[key] - BASES[key]) * ratio
+
+
+def calc_finish_multiplier(intelligence: int) -> float:
+    """
+    知性値に応じた「止め刷し判断の攻撃倍率上限」を返す。
+    enemy.hp <= (atk - def) * multiplier のとき攻撃に転換。
+    - intelligence=1 : 0.8（1撃以下でも実跳的に判断しない）
+    - intelligence=5 : ≈ 1.33（1撃圈内なら攻撃）
+    - intelligence=10: 2.0（2撃圈内なら攻撃）
+    """
+    if intelligence <= 1:
+        return 0.8
+    return 0.8 + (intelligence - 1) * (1.2 / 9)
+
+
 class EnemyAI:
     """敵AIのフェーズ判定・行動選択を担うユーティリティクラス。"""
 
@@ -642,12 +669,12 @@ class BattleEngine:
         character: "Character",
         policy: str,
         skills: list,
-        intelligence: int = 2,
+        intelligence: int = 5,
     ) -> str:
         """
         指定ポリシーに従ってキャラクターを自動行動させる。
         policy: "attack" | "heal" | "defend"
-        intelligence: 1=鬈感 / 2=標準 / 3=銭敏（デフォルト 2）
+        intelligence: 1〜10 スケール（デフォルト 5 = 標準）
         Returns: 戦闘ログ文字列
         """
         if not character.is_alive():
@@ -695,10 +722,8 @@ class BattleEngine:
         # ── 回復優先 ───────────────────────────────────────
         elif policy == "heal":
             if not silenced:
-                from config import ALLY_HEAL_THRESHOLDS
-                _th = ALLY_HEAL_THRESHOLDS.get(intelligence, ALLY_HEAL_THRESHOLDS[2])
-                critical_pct = _th["critical"]
-                hurt_pct     = _th["hurt"]
+                critical_pct = calc_heal_threshold(intelligence, "critical")
+                hurt_pct     = calc_heal_threshold(intelligence, "hurt")
                 # 瞀死（HP ≤ critical_pct）のキャラを最優先で回復
                 critical = [
                     c for c in alive_party
@@ -763,19 +788,19 @@ class BattleEngine:
                     )
                     if not already:
                         return self.player_action(character, "skill", target=character, skill=def_sk)
-                # 止めを刷せる敵がいれば攻撃（知性値1は判断しない）
-                if intelligence >= 2:
-                    atk_val = self.get_effective_attack(character)
-                    one_shot = [
-                        e for e in alive_enemies
-                        if e.hp <= max(1, atk_val - self.get_effective_defense(e))
-                    ]
-                    if one_shot:
-                        target = min(one_shot, key=lambda e: e.hp)
-                        sk = get_skill(["attack"])
-                        if sk:
-                            return self.player_action(character, "skill", target=target, skill=sk)
-                        return self.player_action(character, "attack", target=target)
+                # 止めを刷せる敵がいれば攻撃（知性値に応じた倍率上限で判断）
+                multiplier = calc_finish_multiplier(intelligence)
+                atk_val = self.get_effective_attack(character)
+                one_shot = [
+                    e for e in alive_enemies
+                    if e.hp <= max(1, atk_val - self.get_effective_defense(e)) * multiplier
+                ]
+                if one_shot:
+                    target = min(one_shot, key=lambda e: e.hp)
+                    sk = get_skill(["attack"])
+                    if sk:
+                        return self.player_action(character, "skill", target=target, skill=sk)
+                    return self.player_action(character, "attack", target=target)
             # すべて不該当 → 防御行動
             return self.player_action(character, "defend")
 

@@ -96,14 +96,21 @@ class Character(Base):
         for _ in range(times):
             for stat, (mn, mx) in growth_cfg.items():
                 val = random.randint(mn, mx)
-                setattr(self, stat, getattr(self, stat) + val)
-                deltas[stat] += val
+                if stat == "intelligence":
+                    # 上限 10 でクランプ
+                    old = getattr(self, stat, 0)
+                    new = min(10, old + val)
+                    setattr(self, stat, new)
+                    deltas[stat] += new - old
+                else:
+                    setattr(self, stat, getattr(self, stat) + val)
+                    deltas[stat] += val
         # レベルアップ後に HP / MP を全回復
         self.hp = self.max_hp
         self.mp = self.max_mp
         merged = db.merge(self)
         db.commit()
-        for attr in ("hp", "max_hp", "mp", "max_mp", "attack", "defense"):
+        for attr in ("hp", "max_hp", "mp", "max_mp", "attack", "defense", "intelligence"):
             setattr(self, attr, getattr(merged, attr))
         return deltas
 
@@ -112,7 +119,12 @@ class Character(Base):
         self.level += 1
         plan = LEVEL_UP_PLANS.get(plan_key, LEVEL_UP_PLANS["balanced"])
         for stat, (mn, mx) in plan["growth"].items():
-            setattr(self, stat, getattr(self, stat) + random.randint(mn, mx))
+            delta = random.randint(mn, mx)
+            if stat == "intelligence":
+                old = getattr(self, stat, 0)
+                setattr(self, stat, min(10, old + delta))
+            else:
+                setattr(self, stat, getattr(self, stat) + delta)
         # レベルアップ時に HP / MP を全回復
         self.hp = self.max_hp
         self.mp = self.max_mp

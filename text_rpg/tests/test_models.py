@@ -414,3 +414,20 @@ class TestLevelUpPlans:
         old_hp = chara.max_hp
         chara.apply_growth(db, "unknown_plan", times=1)
         assert chara.max_hp >= old_hp + 10  # balanced の max_hp min = 10
+
+    def test_levelup_support_grows_intelligence(self, db):
+        """support プランのレベルアップで intelligence が +1 増加すること"""
+        user  = User.create(db, "lv_intel", "pass")
+        chara = Character.create(db, user.id, "成長僧侶", "priest")
+        old_intel = chara.intelligence
+        chara.apply_growth(db, "support", times=1)
+        # support の intelligence growth = (1, 1) → 必ず +1
+        assert chara.intelligence == old_intel + 1
+
+    def test_levelup_support_intelligence_capped_at_10(self, db):
+        """intelligence=10 で support プランを適用しても 10 を超えないこと"""
+        user  = User.create(db, "lv_cap", "pass")
+        chara = Character.create(db, user.id, "賢者上限", "priest")
+        chara.intelligence = 10
+        chara.apply_growth(db, "support", times=1)
+        assert chara.intelligence == 10  # クランプ済み

@@ -71,7 +71,7 @@ LEVEL_UP_PLANS: dict[str, dict] = {
     "support": {
         "label": "💫 支援",
         "desc": "MPを重点的に強化する（スキル・回復向け）",
-        "growth": {"max_hp": (8, 12), "max_mp": (6, 12), "attack": (1, 2), "defense": (1, 3)},
+        "growth": {"max_hp": (8, 12), "max_mp": (6, 12), "attack": (1, 2), "defense": (1, 3), "intelligence": (1, 1)},
     },
     "balanced": {
         "label": "⚖️ バランス",
@@ -318,24 +318,21 @@ CLASS_DEFAULT_POLICY: dict[str, str] = {
 }
 
 # ─── 知性値（味方 AI の判断精度）─────────────────────────────────
-# 1=鈍感（単純）  2=標準  3=鋭敏（戦況読解）
+# 1〜10 スケール: 2=低（単純）  5=標準  8=高（戦況読解）
+# 上限は 10（support プランで毎レベル +1 成長）
 CLASS_INTELLIGENCE: dict[str, int] = {
-    "warrior": 1,
-    "monk":    1,
-    "knight":  2,
-    "archer":  2,
-    "thief":   2,
-    "mage":    3,
-    "priest":  3,
-    "bard":    3,
+    "warrior": 2,   # 旧: 1（低）
+    "monk":    2,   # 旧: 1（低）
+    "knight":  5,   # 旧: 2（中）
+    "archer":  5,   # 旧: 2（中）
+    "thief":   5,   # 旧: 2（中）
+    "mage":    8,   # 旧: 3（高）
+    "priest":  8,   # 旧: 3（高）
+    "bard":    8,   # 旧: 3（高）
 }
 
-# 知性値別の回復スキル発動しきい値
-ALLY_HEAL_THRESHOLDS: dict[int, dict[str, float]] = {
-    1: {"critical": 0.20, "hurt": 0.50},   # 鈍感：重傷になってから動く
-    2: {"critical": 0.30, "hurt": 0.70},   # 標準（従来値と同じ）
-    3: {"critical": 0.40, "hurt": 0.80},   # 鋭敏：早めに回復する
-}
+# 回復しきい値は game/battle.py の calc_heal_threshold() で線形補間して取得する
+# （旧 ALLY_HEAL_THRESHOLDS は Section 8 で線形補間方式に移行済み）
 
 # ─── R-12 敵AI 知性値拡張 ─────────────────────────────────────────
 # 知性値別の DANGER フェーズ移行しきい値（HP比）

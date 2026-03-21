@@ -1,4 +1,4 @@
-"""
+﻿"""
 tests/test_battle.py - BattleEngine のユニットテスト
 """
 
@@ -993,26 +993,155 @@ class TestAllyAutoActionIntelligence:
         # 知性3: critical しきい値 40% → 35% は critical → 回復
         assert "ヒール" in msg
 
-    # ── 知性値1: defend で one-shot 判定しない ──────────────────────
+    # ── 知性値1: defend で止め刺し判断が発動しない ──────────────────────
     def test_intel1_defend_skips_oneshot(self):
-        """知性値1 の defend ポリシーは止めを刺せる敵がいても防御行動を選ぶ"""
-        chara  = self._make_char(attack=50, mp=0)  # MPゼロ → スキル不可
-        enemy  = self._make_enemy(hp=1, defense=0)  # 通常攻撃で必ず倒せる
+        """calc_finish_multiplier(1)=0.8 のとき、enemy.hp > atk*0.8 なら防御する"""
+        # atk=20, enemy hp=25, def=0 → threshold=20*0.8=16. hp25 > 16 → one_shot展開なし
+        chara  = self._make_char(attack=20, mp=0)  # MPゼロ→スキル不可
+        enemy  = self._make_enemy(hp=25, defense=0)
         engine = BattleEngine([chara], [enemy])
         msg = engine.ally_auto_action(chara, "defend", [], intelligence=1)
-        # 知性1は one-shot 判定しない → 防御
+        # 知性1: multiplier=0.8 → 25 > 16 → one_shotに属さない → 防御
         assert "防御" in msg
 
     # ── デフォルト引数の後方互換性 ────────────────────────────────
     def test_default_intelligence_backward_compat(self):
-        """intelligence を省略した場合、既存の標準テスト（HP≤30% で回復）が成立する"""
+        """intelligence 省略 → デフォルト 5 (critical≒0.31) で HP25% 回復が成立する"""
         healer  = self._make_char(name="僧侶", class_type="priest", mp=50, char_id=1)
         wounded = self._make_char(name="戦士", char_id=2)
-        wounded.hp     = 25   # 25% ≤ 30% (intel=2 の critical しきい値)
+        wounded.hp     = 25   # 25% ≤ calc_heal_threshold(5, "critical") ≒ 30.6%
         wounded.max_hp = 100
         enemy  = self._make_enemy()
         engine = BattleEngine([healer, wounded], [enemy])
         heal_sk = self._make_skill("ヒール", "heal", mp_cost=10, power=30)
-        # intelligence 引数なし → デフォルト 2 が使われる
+        # intelligence 引数なし → デフォルト 5 が使われる
+        msg = engine.ally_auto_action(healer, "heal", [heal_sk])
+        assert "ヒール" in msg
+
+
+# ─── 知性値細分化・成長システム テスト ────────────────────────────────────────
+class TestAllyIntelligenceGrowth:
+    """calc_heal_threshold / calc_finish_multiplier / レベルアップ知性値成長のテスト"""
+
+    # ── calc_heal_threshold ────────────────────────────────────────────────
+    def test_calc_heal_threshold_min(self):
+        """calc_heal_threshold(1, "critical") は 0.15 であること"""
+        from game.battle import calc_heal_threshold
+        assert abs(calc_heal_threshold(1, "critical") - 0.15) < 1e-9
+
+    def test_calc_heal_threshold_max(self):
+        """calc_heal_threshold(10, "hurt") は 0.85 であること"""
+        from game.battle import calc_heal_threshold
+        assert abs(calc_heal_threshold(10, "hurt") - 0.85) < 1e-9
+
+    def test_calc_heal_threshold_mid(self):
+        """calc_heal_threshold(5, "critical") は約 0.306 であること"""
+        from game.battle import calc_heal_threshold
+        expected = 0.15 + 0.35 * (4 / 9)
+        assert abs(calc_heal_threshold(5, "critical") - expected) < 1e-9
+
+    # ── calc_finish_multiplier ─────────────────────────────────────────────
+    def test_calc_finish_multiplier_low(self):
+        """calc_finish_multiplier(1) は 0.8 であること（止め刺し実質なし）"""
+        from game.battle import calc_finish_multiplier
+        assert abs(calc_finish_multiplier(1) - 0.8) < 1e-9
+
+    def test_calc_finish_multiplier_high(self):
+        """calc_finish_multiplier(10) は 2.0 であること（2撃圏内で攻撃）"""
+        from game.battle import calc_finish_multiplier
+        assert abs(calc_finish_multiplier(10) - 2.0) < 1e-9
+
+    # ── heal ポリシー: intel=5 での動作 ───────────────────────────────────
+    def test_heal_policy_intel5_triggers(self):
+        """知性値5のキャラで HP32% のとき hurt 閾値（≒62.8%）以下なので回復する"""
+        healer = Character()
+        healer.id = 1; healer.name = "僧侶"
+        healer.class_type = "priest"
+        healer.hp = 100; healer.max_hp = 100
+        healer.mp = 50;  healer.max_mp = 50
+        healer.attack = 10; healer.defense = 5
+        healer.level = 1; healer.exp = 0
+
+        wounded = Character()
+        wounded.id = 2; wounded.name = "戦士"
+        wounded.class_type = "warrior"
+        wounded.hp = 32;  wounded.max_hp = 100
+        wounded.mp = 10;  wounded.max_mp = 10
+        wounded.attack = 15; wounded.defense = 8
+        wounded.level = 1; wounded.exp = 0
+
+        enemy = Enemy()
+        enemy.id = 1; enemy.name = "スライム"
+        enemy.hp = 20; enemy.attack = 5; enemy.defense = 0
+        enemy.exp_reward = 10; enemy.is_boss = False
+
+        engine = BattleEngine([healer, wounded], [enemy])
+
+        heal_sk = Skill()
+        heal_sk.id = 1; heal_sk.name = "ヒール"
+        heal_sk.effect_type = "heal"; heal_sk.mp_cost = 10
+        heal_sk.power = 30; heal_sk.cooldown = 0
+        heal_sk.duration = 0; heal_sk.target_type = "ally"
+
+        msg = engine.ally_auto_action(healer, "heal", [heal_sk], intelligence=5)
+        assert "ヒール" in msg
+
+    # ── レベルアップ: intelligence クランプ ───────────────────────────────
+    def test_levelup_support_capped_at_10(self):
+        """intelligence=10 で support プランにレベルアップしても 10 を超えないこと"""
+        c = Character()
+        c.id = 1; c.name = "賢者"; c.class_type = "priest"
+        c.hp = 100; c.max_hp = 100
+        c.mp = 80;  c.max_mp = 80
+        c.attack = 10; c.defense = 8
+        c.level = 1; c.exp = 0
+        c.intelligence = 10
+        c.level_up("support")
+        assert c.intelligence == 10
+
+    def test_levelup_power_no_intel_growth(self):
+        """power プランのレベルアップで intelligence が変化しないこと"""
+        c = Character()
+        c.id = 1; c.name = "戦士"; c.class_type = "warrior"
+        c.hp = 120; c.max_hp = 120
+        c.mp = 20;  c.max_mp = 20
+        c.attack = 18; c.defense = 12
+        c.level = 1; c.exp = 0
+        c.intelligence = 5
+        c.level_up("power")
+        assert c.intelligence == 5
+
+    # ── デフォルト互換 ─────────────────────────────────────────────────────
+    def test_default_intel_backward_compat(self):
+        """intelligence=5（デフォルト）で HP 25% のとき critical 閾値以下（≒30.6%）なので回復する"""
+        from game.battle import calc_heal_threshold
+        threshold = calc_heal_threshold(5, "critical")
+        assert threshold > 0.25
+
+        healer = Character()
+        healer.id = 1; healer.name = "僧侶"; healer.class_type = "priest"
+        healer.hp = 100; healer.max_hp = 100
+        healer.mp = 50; healer.max_mp = 50
+        healer.attack = 10; healer.defense = 5
+        healer.level = 1; healer.exp = 0
+
+        wounded = Character()
+        wounded.id = 2; wounded.name = "戦士"; wounded.class_type = "warrior"
+        wounded.hp = 25; wounded.max_hp = 100
+        wounded.mp = 10; wounded.max_mp = 10
+        wounded.attack = 15; wounded.defense = 8
+        wounded.level = 1; wounded.exp = 0
+
+        enemy = Enemy()
+        enemy.id = 1; enemy.name = "スライム"
+        enemy.hp = 20; enemy.attack = 5; enemy.defense = 0
+        enemy.exp_reward = 10; enemy.is_boss = False
+
+        heal_sk = Skill()
+        heal_sk.id = 1; heal_sk.name = "ヒール"; heal_sk.effect_type = "heal"
+        heal_sk.mp_cost = 10; heal_sk.power = 30
+        heal_sk.cooldown = 0; heal_sk.duration = 0; heal_sk.target_type = "ally"
+
+        engine = BattleEngine([healer, wounded], [enemy])
         msg = engine.ally_auto_action(healer, "heal", [heal_sk])
         assert "ヒール" in msg
