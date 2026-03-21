@@ -349,8 +349,11 @@ if auto_mode:
     if st.button("▶ 全員行動", use_container_width=True, type="primary"):
         _wait = st.session_state["auto_turn_wait"]
         _live = st.empty()  # ライブ表示プレースホルダー
-        # ── パーティ行動 ──
+        # ── 味方1人行動 → 敵全員行動 を人数分繰り返す ──
         for _ac in alive_party:
+            if not _ac.is_alive():
+                continue
+            # 味方1人が行動
             _pol = st.session_state["ally_policies"].get(
                 _ac.id, CLASS_DEFAULT_POLICY.get(_ac.class_type, "attack")
             )
@@ -360,10 +363,10 @@ if auto_mode:
             st.session_state["battle_log"].append(_msg)
             _live.info(f"🗡️ {_msg}")
             time.sleep(_wait)
+            # 敵が全滅したら終了
             if engine.is_all_enemies_dead():
                 break
-        # ── 敵ターン ──
-        if not engine.is_all_enemies_dead():
+            # 敵全員が行動
             _enemy_msgs = engine.enemy_action()
             st.session_state["battle_log"].extend(_enemy_msgs)
             _tick_msgs = engine.tick_buffs()
@@ -379,6 +382,9 @@ if auto_mode:
                 for _em in _enemy_msgs:
                     st.warning(f"👾 {_em}")
             time.sleep(_wait)
+            # パーティ全滅したら終了
+            if engine.is_party_wiped():
+                break
         st.rerun()
 
     st.stop()
