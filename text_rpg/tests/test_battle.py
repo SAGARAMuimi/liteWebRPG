@@ -830,3 +830,189 @@ class TestAllyAutoAction:
         # スキルを使わず通常攻撃のはず
         assert "斬撃" not in msg
         assert "攻撃" in msg
+
+
+# ─── 敵AI 知性値拡張テスト ────────────────────────────────────────────
+class TestEnemyAIIntelligence:
+    """R-12 敵AI 知性値パラメータによる行動変化テスト"""
+
+    def _make_enemy(self, name="オーク", hp=100, attack=10, defense=3):
+        e = make_enemy(name=name, hp=hp, attack=attack, defense=defense)
+        return e
+
+    def _make_party(self, count=2):
+        party = []
+        for i in range(count):
+            c = make_character(name=f"勇者{i+1}", hp=100, attack=15, defense=5)
+            c.id = i + 1
+            party.append(c)
+        return party
+
+    # ── DANGER フェーズ移行しきい値の変化 ─────────────────────────
+    def test_intel1_danger_threshold(self):
+        """知性値1 の敵は HP 40% でも NORMAL フェーズになること（しきい値 35%）"""
+        e = self._make_enemy(hp=40)  # 40/100 = 40%
+        # intel=1: DANGER しきい値=35%. 40% > 35% → NORMAL
+        assert EnemyAI.get_phase(e, max_hp=100, intelligence=1) == "NORMAL"
+
+    def test_intel3_danger_threshold(self):
+        """知性値3 の敵は HP 60% で DANGER フェーズになること（しきい値 65%）"""
+        e = self._make_enemy(hp=60)  # 60/100 = 60%
+        # intel=3: DANGER しきい値=65%. 60% <= 65% → DANGER
+        assert EnemyAI.get_phase(e, max_hp=100, intelligence=3) == "DANGER"
+
+    # ── WIN_FIRST しきい値の変化 ────────────────────────────────
+    def test_intel3_win_first_wider(self):
+        """知性値3 は HP 20% のキャラも WIN_FIRST 対象になるが、知性値2 では対象外"""
+        party = self._make_party()
+        party[0].hp = 20   # 20/100 = 20%
+
+        # intel=2: しきい値=15%. 20% > 15% → WIN_FIRST でない
+        assert EnemyAI.is_win_first(party, intelligence=2) is False
+        # intel=3: しきい値=25%. 20% <= 25% → WIN_FIRST
+        assert EnemyAI.is_win_first(party, intelligence=3) is True
+
+    # ── 知性値1: ランダム行動の混入 ────────────────────────────
+    def test_intel1_random_action(self):
+        """知性値1 の敵で 200 回試行するとローテーション外の行動が観測されること"""
+        e = self._make_enemy(name="オーク", hp=100)
+        # オークの normal_rotation = ["attack", "heavy_blow", "attack"]
+        # index=0 のローテーション行動は "attack"
+        # intel=1: 25%確率でランダム → "heavy_blow" が出る可能性がある
+        results = set()
+        for _ in range(200):
+            name, _ = EnemyAI.choose_action(e, "NORMAL", 0, intelligence=1)
+            results.add(name)
+        # 200回試行で少なくとも1回は "heavy_blow" が出るはず（確率的にほぼ確実）
+        assert len(results) > 1, "知性値1 でもローテーション外行動が一度も観測されなかった"
+
+    # ── デフォルト引数の後方互換性 ──────────────────────────────
+    def test_default_intel_backward_compat(self):
+        """intelligence 引数を省略しても既存テストと同等の動作をすること"""
+        e = self._make_enemy(hp=50)   # 50/100 = 50%
+
+        # 既存テストと同じ: HP=50% で DANGER（intel=2 デフォルト、しきい値 50%）
+        assert EnemyAI.get_phase(e, max_hp=100) == "DANGER"
+
+        # 既存テストと同じ: HP=10% のキャラで WIN_FIRST（intel=2 デフォルト、しきい値 15%）
+        party = self._make_party()
+        party[0].hp = 10   # 10% <= 15%
+        assert EnemyAI.is_win_first(party) is True
+
+
+# ─── 知性値拡張テスト ─────────────────────────────────────────────
+class TestAllyAutoActionIntelligence:
+    """ally_auto_action() の intelligence パラメータによる挙動変化テスト"""
+
+    def _make_char(self, name="勇者", class_type="warrior", hp=100, mp=30,
+                   attack=15, defense=8, char_id=1) -> Character:
+        c = Character()
+        c.id = char_id
+        c.name = name
+        c.class_type = class_type
+        c.hp = hp
+        c.max_hp = hp
+        c.mp = mp
+        c.max_mp = mp
+        c.attack = attack
+        c.defense = defense
+        c.level = 1
+        c.exp = 0
+        return c
+
+    def _make_enemy(self, name="スライム", hp=30, attack=5, defense=0) -> Enemy:
+        e = Enemy()
+        e.id = 1
+        e.name = name
+        e.hp = hp
+        e.attack = attack
+        e.defense = defense
+        e.exp_reward = 10
+        e.is_boss = False
+        return e
+
+    def _make_skill(self, name="ヒール", effect_type="heal",
+                    mp_cost=10, power=30, duration=0, target_type="ally",
+                    skill_id=1) -> Skill:
+        s = Skill()
+        s.id = skill_id
+        s.name = name
+        s.effect_type = effect_type
+        s.mp_cost = mp_cost
+        s.power = power
+        s.cooldown = 0
+        s.duration = duration
+        s.target_type = target_type
+        return s
+
+    # ── 知性値1: 回復しきい値が低い (critical=0.20) ───────────────────
+    def test_intel1_heal_not_triggered_at_25pct(self):
+        """知性値1 の heal ポリシーは HP25% でも critical 未満（20%以下）でないため回復しない"""
+        healer  = self._make_char(name="僧侶", class_type="priest", mp=50, char_id=1)
+        wounded = self._make_char(name="戦士", char_id=2)
+        wounded.hp     = 25   # 25%
+        wounded.max_hp = 100
+        enemy  = self._make_enemy()
+        engine = BattleEngine([healer, wounded], [enemy])
+        heal_sk   = self._make_skill("ヒール", "heal", mp_cost=10, power=30, skill_id=1)
+        attack_sk = self._make_skill("攻撃", "attack", mp_cost=5, power=10,
+                                     target_type="enemy", skill_id=2)
+        msg = engine.ally_auto_action(healer, "heal", [heal_sk, attack_sk], intelligence=1)
+        # 知性1の critical しきい値は 20% → HP25% は critical でない
+        # また hurt しきい値は 50% → HP25% は hurt 範囲 → 回復が走る
+        # (25% < 50% なので hurt に引っかかる)
+        assert "ヒール" in msg
+
+    def test_intel1_heal_not_triggered_at_55pct(self):
+        """知性値1 の heal ポリシーは HP55% では hurt しきい値（50%）以上なので攻撃にフォールバック"""
+        healer  = self._make_char(name="僧侶", class_type="priest", mp=50, char_id=1)
+        wounded = self._make_char(name="戦士", char_id=2)
+        wounded.hp     = 55   # 55%
+        wounded.max_hp = 100
+        enemy  = self._make_enemy()
+        engine = BattleEngine([healer, wounded], [enemy])
+        heal_sk   = self._make_skill("ヒール", "heal", mp_cost=10, power=30, skill_id=1)
+        attack_sk = self._make_skill("攻撃", "attack", mp_cost=5, power=10,
+                                     target_type="enemy", skill_id=2)
+        msg = engine.ally_auto_action(healer, "heal", [heal_sk, attack_sk], intelligence=1)
+        # 知性1: hurt しきい値は 50% → HP55% は heal しない → 攻撃フォールバック
+        assert "ヒール" not in msg
+        assert "攻撃" in msg
+
+    # ── 知性値3: 回復しきい値が高い (critical=0.40, hurt=0.80) ────────
+    def test_intel3_heal_triggered_at_35pct(self):
+        """知性値3 の heal ポリシーは HP35% で critical しきい値（40%）以下なので回復する"""
+        healer  = self._make_char(name="僧侶", class_type="priest", mp=50, char_id=1)
+        wounded = self._make_char(name="戦士", char_id=2)
+        wounded.hp     = 35   # 35%
+        wounded.max_hp = 100
+        enemy  = self._make_enemy()
+        engine = BattleEngine([healer, wounded], [enemy])
+        heal_sk = self._make_skill("ヒール", "heal", mp_cost=10, power=30, skill_id=1)
+        msg = engine.ally_auto_action(healer, "heal", [heal_sk], intelligence=3)
+        # 知性3: critical しきい値 40% → 35% は critical → 回復
+        assert "ヒール" in msg
+
+    # ── 知性値1: defend で one-shot 判定しない ──────────────────────
+    def test_intel1_defend_skips_oneshot(self):
+        """知性値1 の defend ポリシーは止めを刺せる敵がいても防御行動を選ぶ"""
+        chara  = self._make_char(attack=50, mp=0)  # MPゼロ → スキル不可
+        enemy  = self._make_enemy(hp=1, defense=0)  # 通常攻撃で必ず倒せる
+        engine = BattleEngine([chara], [enemy])
+        msg = engine.ally_auto_action(chara, "defend", [], intelligence=1)
+        # 知性1は one-shot 判定しない → 防御
+        assert "防御" in msg
+
+    # ── デフォルト引数の後方互換性 ────────────────────────────────
+    def test_default_intelligence_backward_compat(self):
+        """intelligence を省略した場合、既存の標準テスト（HP≤30% で回復）が成立する"""
+        healer  = self._make_char(name="僧侶", class_type="priest", mp=50, char_id=1)
+        wounded = self._make_char(name="戦士", char_id=2)
+        wounded.hp     = 25   # 25% ≤ 30% (intel=2 の critical しきい値)
+        wounded.max_hp = 100
+        enemy  = self._make_enemy()
+        engine = BattleEngine([healer, wounded], [enemy])
+        heal_sk = self._make_skill("ヒール", "heal", mp_cost=10, power=30)
+        # intelligence 引数なし → デフォルト 2 が使われる
+        msg = engine.ally_auto_action(healer, "heal", [heal_sk])
+        assert "ヒール" in msg

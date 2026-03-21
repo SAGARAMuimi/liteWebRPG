@@ -37,23 +37,23 @@ def seed_initial_data(db) -> None:
 
     # 敵（1F）
     db.add_all([
-        Enemy(name="スライム",    dungeon_id=1, floor=1, hp=20, attack=5,  defense=2, exp_reward=10,  gold_reward=8,   is_boss=False),
-        Enemy(name="コウモリ",    dungeon_id=1, floor=1, hp=15, attack=7,  defense=1, exp_reward=12,  gold_reward=10,  is_boss=False),
+        Enemy(name="スライム",    dungeon_id=1, floor=1, hp=20, attack=5,  defense=2, exp_reward=10,  gold_reward=8,   is_boss=False, intelligence=1),
+        Enemy(name="コウモリ",    dungeon_id=1, floor=1, hp=15, attack=7,  defense=1, exp_reward=12,  gold_reward=10,  is_boss=False, intelligence=1),
     ])
     # 敵（2F）
     db.add_all([
-        Enemy(name="ゴブリン",    dungeon_id=1, floor=2, hp=35, attack=10, defense=4, exp_reward=20,  gold_reward=15,  is_boss=False),
-        Enemy(name="オーク",      dungeon_id=1, floor=2, hp=40, attack=12, defense=5, exp_reward=25,  gold_reward=20,  is_boss=False),
+        Enemy(name="ゴブリン",    dungeon_id=1, floor=2, hp=35, attack=10, defense=4, exp_reward=20,  gold_reward=15,  is_boss=False, intelligence=2),
+        Enemy(name="オーク",      dungeon_id=1, floor=2, hp=40, attack=12, defense=5, exp_reward=25,  gold_reward=20,  is_boss=False, intelligence=2),
     ])
     # 敵（3F 通常）
     db.add_all([
-        Enemy(name="ドラゴン",    dungeon_id=1, floor=3, hp=60, attack=14, defense=6, exp_reward=35,  gold_reward=30,  is_boss=False),
+        Enemy(name="ドラゴン",    dungeon_id=1, floor=3, hp=60, attack=14, defense=6, exp_reward=35,  gold_reward=30,  is_boss=False, intelligence=2),
     ])
     # ボス
     db.add_all([
-        Enemy(name="ゴブリンキング", dungeon_id=1, floor=1, hp=60,  attack=10, defense=5,  exp_reward=50,  gold_reward=40,  is_boss=True,  status_resistance="stun"),
-        Enemy(name="オークチーフ",   dungeon_id=1, floor=2, hp=90,  attack=15, defense=8,  exp_reward=80,  gold_reward=65,  is_boss=True,  status_resistance="stun"),
-        Enemy(name="ダークロード",   dungeon_id=1, floor=3, hp=120, attack=20, defense=10, exp_reward=100, gold_reward=100, is_boss=True,  status_resistance="stun"),
+        Enemy(name="ゴブリンキング", dungeon_id=1, floor=1, hp=60,  attack=10, defense=5,  exp_reward=50,  gold_reward=40,  is_boss=True,  status_resistance="stun", intelligence=3),
+        Enemy(name="オークチーフ",   dungeon_id=1, floor=2, hp=90,  attack=15, defense=8,  exp_reward=80,  gold_reward=65,  is_boss=True,  status_resistance="stun", intelligence=3),
+        Enemy(name="ダークロード",   dungeon_id=1, floor=3, hp=120, attack=20, defense=10, exp_reward=100, gold_reward=100, is_boss=True,  status_resistance="stun", intelligence=3),
     ])
     # スキル（既存4クラス）
     db.add_all([

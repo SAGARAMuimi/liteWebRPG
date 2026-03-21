@@ -316,3 +316,38 @@ CLASS_DEFAULT_POLICY: dict[str, str] = {
     "monk":    "attack",
     "bard":    "heal",
 }
+
+# ─── 知性値（味方 AI の判断精度）─────────────────────────────────
+# 1=鈍感（単純）  2=標準  3=鋭敏（戦況読解）
+CLASS_INTELLIGENCE: dict[str, int] = {
+    "warrior": 1,
+    "monk":    1,
+    "knight":  2,
+    "archer":  2,
+    "thief":   2,
+    "mage":    3,
+    "priest":  3,
+    "bard":    3,
+}
+
+# 知性値別の回復スキル発動しきい値
+ALLY_HEAL_THRESHOLDS: dict[int, dict[str, float]] = {
+    1: {"critical": 0.20, "hurt": 0.50},   # 鈍感：重傷になってから動く
+    2: {"critical": 0.30, "hurt": 0.70},   # 標準（従来値と同じ）
+    3: {"critical": 0.40, "hurt": 0.80},   # 鋭敏：早めに回復する
+}
+
+# ─── R-12 敵AI 知性値拡張 ─────────────────────────────────────────
+# 知性値別の DANGER フェーズ移行しきい値（HP比）
+INTELLIGENCE_THRESHOLDS: dict[int, float] = {
+    1: 0.35,   # 鈍感：HP35%以下でDANGER（気づくのが遅い）
+    2: 0.50,   # 標準：HP50%以下でDANGER
+    3: 0.65,   # 鋭敏：HP65%以下で早めに危機対応
+}
+
+# 知性値別の WIN_FIRST 判定しきい値（HP比）
+WIN_FIRST_THRESHOLDS: dict[int, float] = {
+    1: 0.10,   # 鈍感：HP10%以下のキャラのみ止めを狙う
+    2: 0.15,   # 標準：HP15%以下
+    3: 0.25,   # 鋭敏：HP25%以下のキャラも積極的に狙う
+}

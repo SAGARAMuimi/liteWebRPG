@@ -23,6 +23,8 @@ class Enemy(Base):
     is_boss: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # スタンなど状態異常耐性（カンマ区切り。例: "stun" / "stun,silence"）
     status_resistance: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
+    # 知性値: 1=鈍感（本能） / 2=標準 / 3=鋭敏（戦略的）
+    intelligence: Mapped[int] = mapped_column(default=2, nullable=False)
 
     # ──────────────────────────────────────────────────────
     @staticmethod
@@ -59,5 +61,6 @@ class Enemy(Base):
             gold_reward=self.gold_reward,
             is_boss=self.is_boss,
             status_resistance=self.status_resistance or "",
+            intelligence=getattr(self, "intelligence", 2),
         )
         return e

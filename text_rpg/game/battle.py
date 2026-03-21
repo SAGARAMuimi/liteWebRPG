@@ -33,16 +33,20 @@ class EnemyAI:
     """敵AIのフェーズ判定・行動選択を担うユーティリティクラス。"""
 
     @staticmethod
-    def get_phase(enemy: "Enemy", max_hp: int) -> str:
+    def get_phase(enemy: "Enemy", max_hp: int, intelligence: int = 2) -> str:
         """NORMAL / DANGER を返す"""
+        from config import INTELLIGENCE_THRESHOLDS
+        threshold = INTELLIGENCE_THRESHOLDS.get(intelligence, 0.50)
         ratio = enemy.hp / max(1, max_hp)
-        return "DANGER" if ratio <= 0.5 else "NORMAL"
+        return "DANGER" if ratio <= threshold else "NORMAL"
 
     @staticmethod
-    def is_win_first(party: list["Character"]) -> bool:
-        """瞤死のパーティメンバーがいるか（HP ≤ 15%）"""
+    def is_win_first(party: list["Character"], intelligence: int = 2) -> bool:
+        """瞀死のパーティメンバーがいるか（知性値で閾値変化）"""
+        from config import WIN_FIRST_THRESHOLDS
+        threshold = WIN_FIRST_THRESHOLDS.get(intelligence, 0.15)
         for c in party:
-            if c.is_alive() and c.max_hp > 0 and c.hp / c.max_hp <= 0.15:
+            if c.is_alive() and c.max_hp > 0 and c.hp / c.max_hp <= threshold:
                 return True
         return False
 
@@ -55,11 +59,12 @@ class EnemyAI:
         return min(alive, key=lambda c: c.hp / max(1, c.max_hp))
 
     @staticmethod
-    def choose_action(enemy: "Enemy", phase: str, rotation_idx: int) -> tuple[str, dict]:
+    def choose_action(enemy: "Enemy", phase: str, rotation_idx: int, intelligence: int = 2) -> tuple[str, dict]:
         """
         フェーズとローテーションインデックスから行動名と効果定義を返す。
         Returns: (action_name: str, action_def: dict)
         """
+        import random
         from config import ENEMY_AI_ACTIONS
         pattern = ENEMY_AI_ACTIONS.get(enemy.name, ENEMY_AI_ACTIONS["default"])
         if phase == "DANGER":
@@ -67,7 +72,11 @@ class EnemyAI:
             action_name = priority[rotation_idx % len(priority)]
         else:
             rotation = pattern.get("normal_rotation", ["attack"])
-            action_name = rotation[rotation_idx % len(rotation)]
+            # 知性値1: 25%の確率でローテーションを無視してランダム行動（不視な行動）
+            if intelligence == 1 and random.random() < 0.25:
+                action_name = random.choice(list(pattern.get("actions", {"attack": {}}).keys()))
+            else:
+                action_name = rotation[rotation_idx % len(rotation)]
         action_def = pattern.get("actions", {}).get(action_name, {"type": "attack"})
         return action_name, action_def
 
@@ -448,16 +457,17 @@ class BattleEngine:
                 messages.append(f"{enemy.name} はスタン状態で行動できない！")
                 continue
 
+            intelligence = getattr(enemy, "intelligence", 2)
             max_hp  = self.enemy_max_hp.get(enemy.id, enemy.hp)
-            phase   = EnemyAI.get_phase(enemy, max_hp)
+            phase   = EnemyAI.get_phase(enemy, max_hp, intelligence)
             rot_idx = self.enemy_rotation_idx.get(enemy.id, 0)
 
-            action_name, action_def = EnemyAI.choose_action(enemy, phase, rot_idx)
+            action_name, action_def = EnemyAI.choose_action(enemy, phase, rot_idx, intelligence)
             # ローテーションインデックスを進める
             self.enemy_rotation_idx[enemy.id] = rot_idx + 1
 
             # WIN_FIRST チェック（DANGER 時のみ）
-            if phase == "DANGER" and EnemyAI.is_win_first(self.party):
+            if phase == "DANGER" and EnemyAI.is_win_first(self.party, intelligence):
                 forced_target = EnemyAI.select_win_first_target(self.party)
             else:
                 forced_target = None
@@ -632,10 +642,12 @@ class BattleEngine:
         character: "Character",
         policy: str,
         skills: list,
+        intelligence: int = 2,
     ) -> str:
         """
         指定ポリシーに従ってキャラクターを自動行動させる。
         policy: "attack" | "heal" | "defend"
+        intelligence: 1=鬈感 / 2=標準 / 3=銭敏（デフォルト 2）
         Returns: 戦闘ログ文字列
         """
         if not character.is_alive():
@@ -683,10 +695,14 @@ class BattleEngine:
         # ── 回復優先 ───────────────────────────────────────
         elif policy == "heal":
             if not silenced:
-                # 瀕死（HP ≤ 30%）のキャラを最優先で回復
+                from config import ALLY_HEAL_THRESHOLDS
+                _th = ALLY_HEAL_THRESHOLDS.get(intelligence, ALLY_HEAL_THRESHOLDS[2])
+                critical_pct = _th["critical"]
+                hurt_pct     = _th["hurt"]
+                # 瞀死（HP ≤ critical_pct）のキャラを最優先で回復
                 critical = [
                     c for c in alive_party
-                    if c.hp / max(1, c.max_hp) <= 0.3
+                    if c.hp / max(1, c.max_hp) <= critical_pct
                 ]
                 if critical:
                     sk = get_skill(["heal"])
@@ -705,10 +721,10 @@ class BattleEngine:
                     sk = get_skill(["cure"])
                     if sk:
                         return self.player_action(character, "skill", target=ill[0], skill=sk)
-                # HP < 70% のキャラを回復
+                # HP < hurt_pct のキャラを回復
                 hurt = [
                     c for c in alive_party
-                    if c.hp / max(1, c.max_hp) < 0.7
+                    if c.hp / max(1, c.max_hp) < hurt_pct
                 ]
                 if hurt:
                     sk = get_skill(["heal"])
@@ -747,18 +763,19 @@ class BattleEngine:
                     )
                     if not already:
                         return self.player_action(character, "skill", target=character, skill=def_sk)
-                # 止めを刺せる敵がいれば攻撃
-                atk_val = self.get_effective_attack(character)
-                one_shot = [
-                    e for e in alive_enemies
-                    if e.hp <= max(1, atk_val - self.get_effective_defense(e))
-                ]
-                if one_shot:
-                    target = min(one_shot, key=lambda e: e.hp)
-                    sk = get_skill(["attack"])
-                    if sk:
-                        return self.player_action(character, "skill", target=target, skill=sk)
-                    return self.player_action(character, "attack", target=target)
+                # 止めを刷せる敵がいれば攻撃（知性値1は判断しない）
+                if intelligence >= 2:
+                    atk_val = self.get_effective_attack(character)
+                    one_shot = [
+                        e for e in alive_enemies
+                        if e.hp <= max(1, atk_val - self.get_effective_defense(e))
+                    ]
+                    if one_shot:
+                        target = min(one_shot, key=lambda e: e.hp)
+                        sk = get_skill(["attack"])
+                        if sk:
+                            return self.player_action(character, "skill", target=target, skill=sk)
+                        return self.player_action(character, "attack", target=target)
             # すべて不該当 → 防御行動
             return self.player_action(character, "defend")
 

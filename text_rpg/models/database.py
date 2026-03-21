@@ -277,3 +277,24 @@ def migrate_db() -> None:
                 "atk": row[4], "def": row[5], "hp": row[6], "mp": row[7],
                 "price": row[8], "req": row[9]})
         conn.commit()
+        # ── R-13 味方AI知性値 ───────────────────────────────────────────
+
+        # characters テーブルに intelligence カラム追加（既存 DB 対応）
+        try:
+            conn.execute(text(
+                "ALTER TABLE characters ADD COLUMN intelligence INTEGER NOT NULL DEFAULT 2"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        # ── R-12 敵AI 知性値拡張 ────────────────────────────────────────────
+
+        # enemies テーブルに intelligence カラム追加（既存 DB 対応）
+        try:
+            conn.execute(text(
+                "ALTER TABLE enemies ADD COLUMN intelligence INTEGER NOT NULL DEFAULT 2"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()

@@ -7,7 +7,7 @@ import random
 from sqlalchemy import String, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, Session
 from models.database import Base
-from config import CLASS_INITIAL_STATS, EXP_PER_LEVEL, LEVEL_UP_GROWTH, LEVEL_UP_PLANS, CLASS_DEFAULT_LEVELUP_PLAN
+from config import CLASS_INITIAL_STATS, EXP_PER_LEVEL, LEVEL_UP_GROWTH, LEVEL_UP_PLANS, CLASS_DEFAULT_LEVELUP_PLAN, CLASS_INTELLIGENCE
 
 
 class Character(Base):
@@ -25,6 +25,7 @@ class Character(Base):
     max_mp: Mapped[int] = mapped_column(nullable=False)
     attack: Mapped[int] = mapped_column(nullable=False)
     defense: Mapped[int] = mapped_column(nullable=False)
+    intelligence: Mapped[int] = mapped_column(default=2, nullable=False)
 
     # ──────────────────────────────────────────────────────
     @staticmethod
@@ -40,6 +41,7 @@ class Character(Base):
             max_mp=stats["max_mp"],
             attack=stats["attack"],
             defense=stats["defense"],
+            intelligence=CLASS_INTELLIGENCE.get(class_type, 2),
         )
         db.add(chara)
         db.commit()

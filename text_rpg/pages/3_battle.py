@@ -18,7 +18,7 @@ from game.battle import BattleEngine
 from models.user import User
 from utils.auth import check_login, get_current_user_id
 from utils.helpers import hp_bar, class_display_name
-from config import APP_TITLE, DIFFICULTY_PRESETS, STATUS_AILMENTS, LEVEL_UP_PLANS, CLASS_DEFAULT_LEVELUP_PLAN, ALLY_POLICIES, CLASS_DEFAULT_POLICY
+from config import APP_TITLE, DIFFICULTY_PRESETS, STATUS_AILMENTS, LEVEL_UP_PLANS, CLASS_DEFAULT_LEVELUP_PLAN, ALLY_POLICIES, CLASS_DEFAULT_POLICY, CLASS_INTELLIGENCE
 
 st.set_page_config(page_title=f"戦闘 | {APP_TITLE}", page_icon="⚔️", layout="wide")
 check_login()
@@ -359,7 +359,10 @@ if auto_mode:
             )
             with SessionLocal() as db:
                 _skills = Skill.get_for_class(db, _ac.class_type)
-            _msg = engine.ally_auto_action(_ac, _pol, _skills)
+            _msg = engine.ally_auto_action(
+                        _ac, _pol, _skills,
+                        intelligence=CLASS_INTELLIGENCE.get(_ac.class_type, 2)
+                    )
             st.session_state["battle_log"].append(_msg)
             _live.info(f"🗡️ {_msg}")
             time.sleep(_wait)
