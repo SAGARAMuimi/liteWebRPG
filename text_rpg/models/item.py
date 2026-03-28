@@ -13,7 +13,7 @@ class Item(Base):
 
     id          : Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name        : Mapped[str] = mapped_column(String(64),  nullable=False)
-    description : Mapped[str] = mapped_column(String(256), nullable=False, server_default="")
+    description : Mapped[str] = mapped_column(String(256), nullable=False, server_default="''")
     effect_type : Mapped[str] = mapped_column(String(16),  nullable=False)
     power       : Mapped[int] = mapped_column(nullable=False, default=0)
     target_type : Mapped[str] = mapped_column(String(16),  nullable=False, server_default="ally")

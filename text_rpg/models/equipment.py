@@ -21,14 +21,14 @@ class Equipment(Base):
 
     id             : Mapped[int]  = mapped_column(primary_key=True, autoincrement=True)
     name           : Mapped[str]  = mapped_column(String(64),  nullable=False)
-    description    : Mapped[str]  = mapped_column(String(256), nullable=False, server_default="")
+    description    : Mapped[str]  = mapped_column(String(256), nullable=False, server_default="''")
     slot           : Mapped[str]  = mapped_column(String(16),  nullable=False)  # weapon / armor / accessory
     atk_bonus      : Mapped[int]  = mapped_column(nullable=False, default=0, server_default="0")
     def_bonus      : Mapped[int]  = mapped_column(nullable=False, default=0, server_default="0")
     hp_bonus       : Mapped[int]  = mapped_column(nullable=False, default=0, server_default="0")
     mp_bonus       : Mapped[int]  = mapped_column(nullable=False, default=0, server_default="0")
     price          : Mapped[int]  = mapped_column(nullable=False, default=0,  server_default="0")
-    required_class : Mapped[str]  = mapped_column(String(128), nullable=False, server_default="")
+    required_class : Mapped[str]  = mapped_column(String(128), nullable=False, server_default="''")
     disposable     : Mapped[bool] = mapped_column(nullable=False, default=False, server_default="0")
     # required_class: カンマ区切りの class_type。空 = 全クラス装備可
     # disposable: True = 外すと消える消耗品装備 / False = 外すとキャラインベントリに戻る

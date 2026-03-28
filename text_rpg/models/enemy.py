@@ -22,7 +22,7 @@ class Enemy(Base):
     gold_reward: Mapped[int] = mapped_column(nullable=False, server_default="0", default=0)
     is_boss: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # スタンなど状態異常耐性（カンマ区切り。例: "stun" / "stun,silence"）
-    status_resistance: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
+    status_resistance: Mapped[str] = mapped_column(String(64), nullable=False, server_default="''")
     # 知性値: 1=鈍感（本能） / 2=標準 / 3=鋭敏（戦略的）
     intelligence: Mapped[int] = mapped_column(default=2, nullable=False)
 
