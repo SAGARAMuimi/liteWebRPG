@@ -67,6 +67,10 @@ with tab_login:
                 st.rerun()
             else:
                 st.error("ユーザー名またはパスワードが違います。")
+                # Neon Auth バックエンドのエラー詳細（デバッグ用）
+                _neon_err = st.session_state.pop("_neon_login_error", None)
+                if _neon_err:
+                    st.caption(f"🔍 詳細: {_neon_err}")
 
 with tab_register:
     st.subheader("新規登録")

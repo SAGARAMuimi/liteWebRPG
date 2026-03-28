@@ -327,7 +327,12 @@ def login_user(db: Session, username: str, password: str) -> bool:
             headers["Authorization"] = f"Bearer {admin_token}"
 
         status, data = _http_json("POST", url, headers=headers, body=body)
-        if status != 200 or not isinstance(data, dict):
+        if status not in (200, 201) or not isinstance(data, dict):
+            # デバッグ用: Streamlit Cloud のログで確認できるようにセッションに残す
+            _last_err = f"HTTP {status}"
+            if isinstance(data, dict):
+                _last_err += " / " + str(data.get("message") or data.get("error") or "")
+            st.session_state["_neon_login_error"] = _last_err
             return False
 
         token = data.get("token")
@@ -349,8 +354,14 @@ def login_user(db: Session, username: str, password: str) -> bool:
         return True
 
     from models.user import User
+    from sqlalchemy.exc import SQLAlchemyError
 
-    user = User.find_by_name(db, username)
+    try:
+        user = User.find_by_name(db, username)
+    except SQLAlchemyError:
+        st.error("データベースへの接続に失敗しました。しばらく待ってから再試行してください。")
+        return False
+
     if user and user.verify_password(password):
         st.session_state["user_id"] = user.id
         st.session_state["username"] = user.name
@@ -384,10 +395,21 @@ def register_user(db: Session, username: str, password: str, *, email: str | Non
             headers["Authorization"] = f"Bearer {admin_token}"
 
         status, data = _http_json("POST", url, headers=headers, body=body)
-        if status != 200 or not isinstance(data, dict):
+        # Better Auth は 200 または 201 (Created) を返す実装がある
+        if status not in (200, 201) or not isinstance(data, dict):
             if status == 422:
-                return False, "そのメールアドレスは既に登録済みです。"
-            return False, "登録に失敗しました。"
+                # 重複などバリデーションエラー
+                detail = ""
+                if isinstance(data, dict):
+                    detail = str(data.get("message") or data.get("error") or "")
+                msg = f"そのメールアドレスは既に登録済みです。{(' / ' + detail) if detail else ''}"
+                return False, msg
+            detail = ""
+            if isinstance(data, dict):
+                detail = str(data.get("message") or data.get("error") or "")
+            elif isinstance(data, str):
+                detail = data[:200]
+            return False, f"登録に失敗しました。（HTTP {status}{(' / ' + detail) if detail else ''}）"
 
         neon_user = data.get("user")
         if isinstance(neon_user, dict):
@@ -415,7 +437,7 @@ def register_user(db: Session, username: str, password: str, *, email: str | Non
 
     from models.user import User
     from utils.helpers import give_starter_items
-    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.exc import IntegrityError, SQLAlchemyError
     try:
         user = User.create(db, username, password)
         st.session_state["user_id"] = user.id
@@ -425,6 +447,9 @@ def register_user(db: Session, username: str, password: str, *, email: str | Non
     except IntegrityError:
         db.rollback()
         return False, "そのユーザー名はすでに使われています。"
+    except SQLAlchemyError as e:
+        db.rollback()
+        return False, f"データベースエラーが発生しました。しばらく待ってから再試行してください。（{type(e).__name__}）"
 
 
 def logout_user() -> None:
