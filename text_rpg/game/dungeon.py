@@ -12,7 +12,9 @@ from config import (
     ENCOUNTER_RATE, ENCOUNTER_COUNT, ROOMS_PER_FLOOR,
     EVENT_WEIGHTS, TRAP_DAMAGE_PCT, REST_HEAL_PCT, SHRINE_HEAL_PCT,
     MERCHANT_STOCK, CHEST_GOLD_RANGE, CHEST_PATTERNS, CHEST_ITEM_IDS,
+    FLOOR_MAPS,  # R-14
 )
+from game.map_manager import MapManager  # R-14
 
 # ミミックのフロア別ステータス（DB 非保存・戦闘時にインメモリ生成）
 _MIMIC_STATS: dict[int, dict] = {
@@ -313,6 +315,86 @@ class DungeonManager:
         )
 
     # ──────────────────────────────────────────────────────
+    # グリッドダンジョン専用メソッド（R-14）
+    # ──────────────────────────────────────────────────────
+
+    def get_map_manager(self) -> MapManager:
+        """
+        現在フロアの MapManager を生成して返す。
+        DungeonProgress の current_x/y が -1（未初期化）の場合は
+        フロアのスタート座標を使用する。
+        """
+        floor = self.progress.current_floor
+        floor_data = FLOOR_MAPS[floor]
+        sx, sy = floor_data["start"]
+        x = self.progress.current_x if self.progress.current_x >= 0 else sx
+        y = self.progress.current_y if self.progress.current_y >= 0 else sy
+        return MapManager(floor, x, y)
+
+    def start_floor(self, floor: int) -> MapManager:
+        """
+        指定フロアをスタートする。
+        DungeonProgress の current_floor / current_x / current_y を
+        更新してDBに保存し、MapManager を返す。
+        """
+        floor_data = FLOOR_MAPS[floor]
+        sx, sy = floor_data["start"]
+        self.progress.current_floor = floor
+        self.progress.current_x = sx
+        self.progress.current_y = sy
+        self.progress.save(self.db)
+        return MapManager(floor, sx, sy)
+
+    def resolve_event_at(
+        self,
+        x: int,
+        y: int,
+        party: list,
+        hp_mult: float = 1.0,
+        atk_mult: float = 1.0,
+    ) -> EventResult:
+        """
+        グリッドダンジョンの座標 (x, y) のイベントを解決する。
+
+        - ゴールマス    : 常にボス戦
+        - 固定イベント  : fixed_events の event_type を使用
+        - それ以外      : EVENT_WEIGHTS によるランダム選択（既存ロジック再利用）
+        """
+        mm = MapManager(self.current_floor, x, y)
+        if mm.is_goal():
+            return self._event_boss(hp_mult, atk_mult)
+
+        fixed = mm.get_fixed_event()
+        if fixed:
+            return self._resolve_by_type(fixed, party, hp_mult, atk_mult)
+
+        # ランダムイベント（既存の resolve_event を room=0 で流用）
+        return self.resolve_event(party, room=0, hp_mult=hp_mult, atk_mult=atk_mult)
+
+    def _resolve_by_type(
+        self,
+        event_type: str,
+        party: list,
+        hp_mult: float = 1.0,
+        atk_mult: float = 1.0,
+    ) -> EventResult:
+        """イベント種別を直接指定してイベント解決を行う（内部メソッド）"""
+        if event_type == "encounter":
+            return self._event_encounter(party, hp_mult, atk_mult)
+        elif event_type == "trap":
+            return self._event_trap(party)
+        elif event_type == "merchant":
+            return self._event_merchant()
+        elif event_type == "shrine":
+            return self._event_shrine(party)
+        elif event_type == "rest":
+            return self._event_rest(party)
+        elif event_type == "chest":
+            return self._event_chest()
+        else:
+            return EventResult(event_type="nothing", messages=["静かだ…何も起きなかった。"])
+
+    # ──────────────────────────────────────────────────────
     # 進行管理
     # ──────────────────────────────────────────────────────
     def advance_to_next_floor(self) -> bool:
@@ -331,6 +413,8 @@ class DungeonManager:
     def reset_progress(self) -> None:
         """進行状況をリセット（再挑戦用）"""
         self.progress.current_floor = 1
+        self.progress.current_x = -1  # R-14: グリッド座標もリセット
+        self.progress.current_y = -1  # R-14: グリッド座標もリセット
         self.progress.is_cleared = False
         self.progress.save(self.db)
 

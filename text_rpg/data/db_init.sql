@@ -2,9 +2,24 @@
 -- 初期データ投入スクリプト
 -- 使用方法: python -c "from models.database import init_db; init_db()" でテーブル作成後に実行
 
+-- ─── R-14 マイグレーション（既存DBへの列追加）────────────────────────────
+-- 新規DBでは SQLAlchemy モデルが自動作成するため不要。
+-- 既存DBに対してのみ手動で実行すること。
+-- SQLite は ADD COLUMN のみサポート（既存列への変更・削除は不可）。
+ALTER TABLE dungeons ADD COLUMN map_type VARCHAR(16) NOT NULL DEFAULT 'linear';
+ALTER TABLE dungeon_progress ADD COLUMN current_x INTEGER NOT NULL DEFAULT -1;
+ALTER TABLE dungeon_progress ADD COLUMN current_y INTEGER NOT NULL DEFAULT -1;
+-- ────────────────────────────────────────────────────────────────────────────
+
 -- ダンジョン
 INSERT OR IGNORE INTO dungeons (id, name, floor) VALUES
-  (1, '暗黒の洞窟', 3);
+  (1, '旅立ちの洞窟', 3);
+-- 既存レコードのダンジョン名を更新（暗黒の洞窟 → 旅立ちの洞窟）
+UPDATE dungeons SET name = '旅立ちの洞窟' WHERE id = 1;
+
+-- 迷宮の神殿（グリッドマップ型 / R-14 で追加）
+INSERT OR IGNORE INTO dungeons (id, name, floor, map_type) VALUES
+  (2, '迷宮の神殿', 3, 'grid');
 
 -- 敵（1F）
 INSERT OR IGNORE INTO enemies (id, name, dungeon_id, floor, hp, attack, defense, exp_reward, is_boss) VALUES
@@ -139,3 +154,24 @@ VALUES
   (10, '体力のリング','最大HPを上昇させる不思議な指輪',     'accessory', 0, 0, 20,  0, 150, '', 0),
   (11, '魔力のリング','最大MPを上昇させる不思議な指輪',     'accessory', 0, 0,  0, 15, 150, '', 0),
   (12, '鋼の腕輪',    '腕力を高める金属製の腕輪',           'accessory', 2, 0,  0,  0, 130, '', 0);
+
+-- ─── 迷宮の神殿 敵データ（dungeon_id=2 / R-14）──────────────────────────
+-- 1F 通常敵
+INSERT OR IGNORE INTO enemies (id, name, dungeon_id, floor, hp, attack, defense, exp_reward, is_boss) VALUES
+  (20, 'ゾンビ',         2, 1,  30,  6,  3,  15, 0),
+  (21, '骸骨剣士',       2, 1,  25,  8,  2,  18, 0);
+
+-- 2F 通常敵
+INSERT OR IGNORE INTO enemies (id, name, dungeon_id, floor, hp, attack, defense, exp_reward, is_boss) VALUES
+  (22, '呪われた騎士',   2, 2,  50, 12,  6,  30, 0),
+  (23, 'ダークエルフ',   2, 2,  40, 14,  4,  28, 0);
+
+-- 3F 通常敵
+INSERT OR IGNORE INTO enemies (id, name, dungeon_id, floor, hp, attack, defense, exp_reward, is_boss) VALUES
+  (24, '死霊術師',       2, 3,  70, 16,  5,  40, 0);
+
+-- ボス（各階）
+INSERT OR IGNORE INTO enemies (id, name, dungeon_id, floor, hp, attack, defense, exp_reward, is_boss) VALUES
+  (25, '邪神の使徒',     2, 1,  70, 12,  6,  55, 1),
+  (26, '魔将軍',         2, 2, 100, 18,  9,  85, 1),
+  (27, '冥界の番人',     2, 3, 140, 24, 12, 110, 1);

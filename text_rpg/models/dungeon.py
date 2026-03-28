@@ -15,6 +15,12 @@ class Dungeon(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     floor: Mapped[int] = mapped_column(nullable=False)  # 最大階層数
+    map_type: Mapped[str] = mapped_column(String(16), default="linear", nullable=False)  # R-14: 'linear' or 'grid'
+
+    @property
+    def is_grid(self) -> bool:
+        """グリッドマップ型ダンジョンかどうか（R-14）"""
+        return self.map_type == "grid"
 
     @staticmethod
     def get_all(db: Session) -> list["Dungeon"]:
@@ -32,6 +38,8 @@ class DungeonProgress(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     dungeon_id: Mapped[int] = mapped_column(ForeignKey("dungeons.id"), nullable=False)
     current_floor: Mapped[int] = mapped_column(default=1, nullable=False)
+    current_x: Mapped[int] = mapped_column(default=-1, nullable=False)  # R-14: グリッド座標X（linear では -1）
+    current_y: Mapped[int] = mapped_column(default=-1, nullable=False)  # R-14: グリッド座標Y（linear では -1）
     is_cleared: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
@@ -58,3 +66,9 @@ class DungeonProgress(Base):
         self.updated_at = datetime.utcnow()
         db.merge(self)
         db.commit()
+
+    def set_position(self, x: int, y: int, db: Session) -> None:
+        """グリッド座標をDBに保存する（R-14 grid ダンジョン専用）"""
+        self.current_x = x
+        self.current_y = y
+        self.save(db)

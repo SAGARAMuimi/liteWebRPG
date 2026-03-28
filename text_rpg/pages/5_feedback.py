@@ -5,7 +5,7 @@ import re
 import streamlit as st
 from models.database import SessionLocal
 from models.feedback import Feedback
-from utils.auth import check_login
+from utils.auth import check_login, get_auth_backend
 from config import (
     FEEDBACK_CATEGORIES,
     FEEDBACK_SEVERITIES,
@@ -22,6 +22,7 @@ st.title("📬 不具合報告・改善要望")
 st.caption("ゲームに関するご意見・不具合をお知らせください。")
 
 user_id: int = st.session_state["user_id"]
+auth_backend = get_auth_backend()
 
 # ── カテゴリ選択 ──────────────────────────────────────────────────────────
 cat_options = list(FEEDBACK_CATEGORIES.keys())
@@ -65,12 +66,28 @@ body = st.text_area(
 body_len = len(body)
 st.caption(f"{body_len} / {FEEDBACK_MAX_BODY_LENGTH} 文字")
 
-# ── 連絡先（任意） ──────────────────────────────────────────────────────
-st.subheader("📧 連絡先（任意）")
+# ── 連絡・匿名設定 ──────────────────────────────────────────────────────
+st.subheader("🧩 連絡・匿名設定")
+
+is_anonymous = False
+if auth_backend == "neon":
+    is_anonymous = st.checkbox(
+        "匿名で送信する（フィードバックDBにアカウント情報を残しません）",
+        value=False,
+    )
+else:
+    st.caption("※匿名送信は Neon Auth 利用時のみ対応しています。")
+
+needs_reply = st.checkbox(
+    "管理者からの連絡が必要（返信を希望する）",
+    value=False,
+)
+
 contact_email = st.text_input(
-    "メールアドレス（任意）",
-    placeholder="返信が必要な場合のみ使用します（例: you@example.com）",
-    help="任意入力です。本文には個人情報やSNSアカウント等を書かないでください。",
+    "連絡先メールアドレス（返信希望のときのみ）",
+    placeholder="例: you@example.com（匿名送信の場合は未入力不可）",
+    help="本文には個人情報やSNSアカウント等を書かないでください。",
+    disabled=not needs_reply,
 )
 
 # ── 注意事項（免責） ────────────────────────────────────────────────────
@@ -83,7 +100,8 @@ with st.expander("内容を表示", expanded=False):
 - 本フォームは緊急連絡手段ではありません。
 - 本文には、氏名・住所・電話番号・パスワード等の個人情報、第三者の個人情報、機密情報を記載しないでください。
 - 本文にSNSアカウント等の連絡先を記載されても、個別連絡の希望に必ずしもお応えできません（記載内容は必要に応じて削除・非表示等を行うことがあります）。
-- メールアドレス（任意入力）は、当該フィードバックへの連絡が必要と判断した場合に限り利用します。
+- 「匿名で送信する」は、フィードバックDBにアカウント情報（ユーザー識別子）を残さないための設定です。
+- 返信を希望する場合、メールアドレス（任意入力）を当該フィードバックへの連絡に利用します。
 - 禁止事項（誹謗中傷、差別、わいせつ表現、権利侵害、スパム等）に該当する投稿は削除等を行うことがあります。
 
 本フォームの利用またはフィードバックへの未対応・対応遅延等により生じた損害について、運営者は故意または重過失がある場合を除き責任を負いません。
@@ -108,9 +126,18 @@ if st.button("📨 送信する", type="primary"):
     if body_len > FEEDBACK_MAX_BODY_LENGTH:
         errors.append(f"詳細は {FEEDBACK_MAX_BODY_LENGTH} 文字以内にしてください。")
 
-    email_norm = contact_email.strip() if contact_email else ""
-    if email_norm:
-        if len(email_norm) > 254:
+    # 返信希望のときのみメールを扱う
+    email_norm = ""
+    if needs_reply:
+        email_norm = contact_email.strip() if contact_email else ""
+        if not email_norm and auth_backend == "neon" and not is_anonymous:
+            neon_user = st.session_state.get("neon_user")
+            if isinstance(neon_user, dict):
+                email_norm = str(neon_user.get("email") or "").strip()
+
+        if not email_norm:
+            errors.append("返信を希望する場合はメールアドレスを入力してください（匿名送信の場合は必須です）。")
+        elif len(email_norm) > 254:
             errors.append("メールアドレスが長すぎます（254文字以内）。")
         else:
             email_re = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -141,7 +168,7 @@ if st.button("📨 送信する", type="primary"):
                     )
                 else:
                     try:
-                        Feedback.create(
+                        fb = Feedback.create(
                             db,
                             category=category,
                             title=title,
@@ -150,7 +177,13 @@ if st.button("📨 送信する", type="primary"):
                             page_context=page_context,
                             severity=severity,
                             contact_email=email_norm or None,
+                            needs_reply=needs_reply,
+                            is_anonymous=is_anonymous,
                         )
+                        st.session_state.setdefault("my_feedback_ids", [])
+                        st.session_state["my_feedback_ids"] = (
+                            [fb.id] + [i for i in st.session_state["my_feedback_ids"] if i != fb.id]
+                        )[:50]
                         st.success("✅ フィードバックを送信しました。ありがとうございます！")
                         st.info(f"本日の送信数: {today_count + 1} / {FEEDBACK_DAILY_LIMIT}")
                     except ValueError as e:
@@ -161,9 +194,25 @@ st.divider()
 st.subheader("📋 自分の送信履歴")
 
 with SessionLocal() as db:
-    my_feedbacks = Feedback.get_all(db, limit=20, offset=0)
-    # user_id でフィルタ
-    my_feedbacks = [f for f in my_feedbacks if f.user_id == user_id]
+    my_feedbacks: list[Feedback] = []
+    # user_id でフィルタ（通常送信分）
+    all_feedbacks = Feedback.get_all(db, limit=50, offset=0)
+    my_feedbacks.extend([f for f in all_feedbacks if f.user_id == user_id])
+
+    # 匿名送信分（user_id を保存しないため、同一ブラウザセッション内の送信IDで追跡）
+    ids = st.session_state.get("my_feedback_ids")
+    if isinstance(ids, list):
+        for fid in ids[:50]:
+            try:
+                fid_int = int(fid)
+            except Exception:
+                continue
+            fb = Feedback.get_by_id(db, fid_int)
+            if fb and fb not in my_feedbacks:
+                my_feedbacks.append(fb)
+
+    my_feedbacks.sort(key=lambda f: f.created_at, reverse=True)
+    my_feedbacks = my_feedbacks[:20]
 
 if not my_feedbacks:
     st.info("まだフィードバックを送信していません。")

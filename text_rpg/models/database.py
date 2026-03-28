@@ -1,14 +1,117 @@
-"""
-models/database.py - DB接続・セッション管理
-"""
+"""models/database.py - DB接続・セッション管理"""
+
+import ssl
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
+
 from config import DATABASE_URL
 
+
+def _normalize_database_url(database_url: str) -> str:
+    """PostgreSQL URL に pg8000 ドライバを強制する。
+
+    SQLAlchemy は postgresql:// の場合にデフォルトドライバ（psycopg 系）を期待するため、
+    psycopg を入れない運用では postgresql+pg8000:// に正規化して動作させる。
+    """
+    url = (database_url or "").strip()
+
+    # Heroku などで使われる短縮スキームを正規化
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+
+    # ドライバ未指定の postgresql:// を pg8000 に寄せる
+    if url.startswith("postgresql://") and "postgresql+" not in url:
+        url = url.replace("postgresql://", "postgresql+pg8000://", 1)
+
+    return url
+
+
+def _strip_sslmode_query(url: str) -> tuple[str, str | None]:
+    """URL クエリの sslmode を除去して値を返す。
+
+    psycopg 系の URL でよく使われる `sslmode=require` は pg8000 では未対応で、
+    そのまま渡すと TypeError になるため取り除く。
+    """
+    parts = urlsplit(url)
+    if not parts.query:
+        return url, None
+
+    sslmode: str | None = None
+    kept: list[tuple[str, str]] = []
+    for k, v in parse_qsl(parts.query, keep_blank_values=True):
+        if k.lower() == "sslmode":
+            sslmode = v
+            continue
+        kept.append((k, v))
+
+    new_query = urlencode(kept)
+    new_url = urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+    return new_url, sslmode
+
+
+def _sanitize_pg8000_query(url: str) -> tuple[str, str | None]:
+    """pg8000 で受け取れないクエリパラメータを取り除く。
+
+    Neon などが発行する libpq/psycopg 向け URL には `sslmode` や `channel_binding` 等が
+    付くことがあるが、pg8000.connect() はこれらを受け取れず TypeError になる。
+    """
+    url, sslmode = _strip_sslmode_query(url)
+    parts = urlsplit(url)
+    if not parts.query:
+        return url, sslmode
+
+    allowed_simple_keys = {
+        "application_name",
+        "timeout",
+        "tcp_keepalive",
+        "replication",
+    }
+    drop_keys = {
+        "channel_binding",
+        # libpq 系の SSL パラメータ（pg8000 は別方式）
+        "sslrootcert",
+        "sslcert",
+        "sslkey",
+        "sslpassword",
+    }
+
+    kept: list[tuple[str, str]] = []
+    for k, v in parse_qsl(parts.query, keep_blank_values=True):
+        kl = k.lower()
+        if kl in drop_keys:
+            continue
+        if kl in allowed_simple_keys:
+            kept.append((k, v))
+            continue
+        # それ以外は pg8000 に渡すと落ちる可能性が高いので除去
+
+    new_query = urlencode(kept)
+    new_url = urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+    return new_url, sslmode
+
+
+def _build_connect_args(db_url: str, sslmode: str | None) -> dict:
+    if db_url.startswith("sqlite"):
+        return {"check_same_thread": False}
+
+    # pg8000 は sslmode を受け取れないため、必要に応じて ssl_context を設定する
+    if db_url.startswith("postgresql") and sslmode:
+        mode = sslmode.strip().lower()
+        if mode in {"require", "verify-ca", "verify-full"}:
+            return {"ssl_context": ssl.create_default_context()}
+
+    return {}
+
+_db_url = _normalize_database_url(DATABASE_URL)
+if _db_url.startswith("postgresql"):
+    _db_url, _sslmode = _sanitize_pg8000_query(_db_url)
+else:
+    _db_url, _sslmode = _strip_sslmode_query(_db_url)
 engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
+    _db_url,
+    connect_args=_build_connect_args(_db_url, _sslmode),
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
 
@@ -37,6 +140,12 @@ def migrate_db() -> None:
     既存 DB へのスキーマ変更・データ修正を冪等に実行する。
     init_db() の直後に呼び出すこと。
     """
+    # この関数は SQLite の既存ファイルDB向けに、SQLite方言の SQL を多用している。
+    # PostgreSQL/MySQL 運用では Alembic 等での正式マイグレーションへ移行する想定とし、
+    # ここでは安全のため何もしない。
+    if engine.dialect.name != "sqlite":
+        return
+
     from sqlalchemy import text
     with engine.connect() as conn:
         # users テーブルに gold カラム追加
@@ -346,6 +455,8 @@ def migrate_db() -> None:
                 title        VARCHAR(128) NOT NULL,
                 body         TEXT         NOT NULL,
                 contact_email VARCHAR(254),
+                needs_reply  INTEGER      NOT NULL DEFAULT 0,
+                is_anonymous INTEGER      NOT NULL DEFAULT 0,
                 page_context VARCHAR(64)  NOT NULL DEFAULT '',
                 severity     VARCHAR(16)  NOT NULL DEFAULT 'normal',
                 status       VARCHAR(16)  NOT NULL DEFAULT 'open',
@@ -364,3 +475,14 @@ def migrate_db() -> None:
             conn.commit()
         except Exception:
             conn.rollback()
+
+        # feedbacks テーブルに needs_reply / is_anonymous カラム追加（既存 DB 対応）
+        for ddl in [
+            "ALTER TABLE feedbacks ADD COLUMN needs_reply INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE feedbacks ADD COLUMN is_anonymous INTEGER NOT NULL DEFAULT 0",
+        ]:
+            try:
+                conn.execute(text(ddl))
+                conn.commit()
+            except Exception:
+                conn.rollback()

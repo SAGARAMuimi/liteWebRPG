@@ -1,6 +1,7 @@
 # 詳細設計書：FEEDBACK 不具合報告・改善要望フォーム
 
 作成日: 2026-03-21  
+更新日: 2026-03-25  
 対象ブランチ: main（169テスト通過済み）
 
 ---
@@ -46,7 +47,7 @@ models/
 | 課題 | 対応方針 |
 |---|---|
 | 報告手段がない | ゲーム内から直接送信できる独立ページを追加 |
-| 匹名報告だと再現確認が困難 | ログイン中はユーザー情報を自動付与（匹名送信は将来拡張時に導入） |
+| 匿名送信だと再現確認が困難になり得る | **Neon Auth 利用時のみ**匿名送信（`feedbacks.user_id = NULL`）を選択可能にし、未チェック時はユーザー情報を自動付与 |
 | 投稿の追跡・管理ができない | DB に蓄積し管理者ページで対応状況を管理 |
 
 ### スコープ
@@ -54,7 +55,9 @@ models/
 - **追加するファイル**: `models/feedback.py`, `pages/5_feedback.py`, `pages/99_admin_feedback.py`
 - **変更するファイル**: `config.py`, `models/__init__.py`, `models/database.py`, `utils/auth.py`
 - 既存のゲームロジック（`game/battle.py` 等）への変更はなし
-- 匿名送信（`user_id = NULL`）は本設計のスコープ外とする（将来拡張参照）
+- 既存のゲームロジック（`game/battle.py` 等）への変更はなし
+- 未ログイン状態での送信解禁は行わない（送信はログイン必須）
+- **Neon Auth 利用時のみ**、匿名送信（`feedbacks.user_id = NULL` として保存）に対応する
 - メール通知・画像添付は本設計のスコープ外とする
 
 ---
@@ -76,7 +79,7 @@ models/
 config.py
   └─ FEEDBACK_CATEGORIES, FEEDBACK_SEVERITIES, FEEDBACK_STATUSES,
      FEEDBACK_PAGE_LABELS, FEEDBACK_MAX_BODY_LENGTH,
-     FEEDBACK_DAILY_LIMIT, FEEDBACK_SESSION_LIMIT, FEEDBACK_DUPLICATE_MINUTES
+    FEEDBACK_DAILY_LIMIT, FEEDBACK_DUPLICATE_MINUTES
 
 models/feedback.py
   └─ Base (models/database.py)
@@ -90,7 +93,7 @@ models/database.py
 
 pages/5_feedback.py
   └─ Feedback (models/feedback.py)
-  └─ check_login, get_current_user_id (utils/auth.py)
+    └─ check_login, get_auth_backend (utils/auth.py)
   └─ FEEDBACK_* 定数 (config.py)
 
 pages/99_admin_feedback.py
@@ -144,7 +147,7 @@ FEEDBACK_PAGE_LABELS: dict[str, str] = {
 FEEDBACK_MAX_BODY_LENGTH: int     = 2000
 FEEDBACK_DAILY_LIMIT: int         = 10   # ログイン済みユーザーの 1 日上限
 FEEDBACK_DUPLICATE_MINUTES: int   = 5    # 同件名の重複送信をブロックする時間（分）
-# FEEDBACK_SESSION_LIMIT は匹名送信解禁（将来拡張）時に追加する
+# 匿名送信でも送信者が同一セッション内で履歴確認できるよう、送信IDを session_state に保持する
 ```
 
 ---
@@ -169,7 +172,7 @@ class Feedback(Base):
     __tablename__ = "feedbacks"
 
     id          : Mapped[int]       = mapped_column(primary_key=True, autoincrement=True)
-    user_id     : Mapped[int|None]  = mapped_column(nullable=True)                  # 将来の匹名送信解禁までは常に SET
+    user_id     : Mapped[int|None]  = mapped_column(nullable=True)                  # 匿名送信時は NULL（Neon Auth 利用時のみUIで選択可能）
     category    : Mapped[str]       = mapped_column(String(16),  nullable=False)
     title       : Mapped[str]       = mapped_column(String(128), nullable=False)
     body        : Mapped[str]       = mapped_column(Text,        nullable=False)
@@ -367,17 +370,20 @@ __all__ = [
         # feedbacks テーブル作成（存在しない場合）
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS feedbacks (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id      INTEGER REFERENCES users(id),  -- 将来の匹名送信解禁までは常に NOT NULL 相当
-                category     VARCHAR(16)  NOT NULL,
-                title        VARCHAR(128) NOT NULL,
-                body         TEXT         NOT NULL,
-                page_context VARCHAR(64)  NOT NULL DEFAULT '',
-                severity     VARCHAR(16)  NOT NULL DEFAULT 'normal',
-                status       VARCHAR(16)  NOT NULL DEFAULT 'open',
-                admin_note   TEXT         NOT NULL DEFAULT '',
-                created_at   DATETIME     NOT NULL,
-                updated_at   DATETIME     NOT NULL
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id       INTEGER REFERENCES users(id),  -- 匿名送信時は NULL
+                category      VARCHAR(16)  NOT NULL,
+                title         VARCHAR(128) NOT NULL,
+                body          TEXT         NOT NULL,
+                page_context  VARCHAR(64)  NOT NULL DEFAULT '',
+                severity      VARCHAR(16)  NOT NULL DEFAULT 'normal',
+                status        VARCHAR(16)  NOT NULL DEFAULT 'open',
+                admin_note    TEXT         NOT NULL DEFAULT '',
+                contact_email VARCHAR(254),
+                needs_reply   INTEGER      NOT NULL DEFAULT 0,
+                is_anonymous  INTEGER      NOT NULL DEFAULT 0,
+                created_at    DATETIME     NOT NULL,
+                updated_at    DATETIME     NOT NULL
             )
         """))
         conn.commit()
@@ -430,7 +436,7 @@ import models  # noqa: F401
 import streamlit as st
 from models.database import SessionLocal
 from models.feedback import Feedback
-from utils.auth import check_login, get_current_user_id
+from utils.auth import check_login
 from config import (
     APP_TITLE,
     FEEDBACK_CATEGORIES,
@@ -444,7 +450,7 @@ from config import (
 st.set_page_config(page_title=f"報告フォーム | {APP_TITLE}", page_icon="📢", layout="centered")
 check_login()
 
-user_id = get_current_user_id()
+user_id = st.session_state.get("user_id")
 
 st.title("📢 不具合報告・改善要望")
 st.caption(f"ログイン中: {st.session_state['username']}")
@@ -514,9 +520,6 @@ if st.button("📤 送信する", type="primary", use_container_width=True):
     if not anonymous and today_count >= FEEDBACK_DAILY_LIMIT:
         st.warning(f"本日の送信上限（{FEEDBACK_DAILY_LIMIT}件）に達しています。")
         st.stop()
-    if anonymous and st.session_state["feedback_session_count"] >= FEEDBACK_SESSION_LIMIT:
-        st.warning(f"このセッション内での送信上限（{FEEDBACK_SESSION_LIMIT}件）に達しています。")
-        st.stop()
 
     # ─── 保存 ─────────────────────────────────────────────────
     submit_user_id = None if anonymous else user_id
@@ -530,7 +533,7 @@ if st.button("📤 送信する", type="primary", use_container_width=True):
             page_context=selected_page if selected_page != "other" else "",
             severity=severity,
         )
-    st.session_state["feedback_session_count"] += 1
+    st.session_state.setdefault("my_feedback_ids", []).append(int(fb.id))
     st.success(f"✅ ご報告ありがとうございます！  受付番号: **#{fb.id}**")
     # フォームリセット（rerun でウィジェットを初期化）
     st.rerun()
@@ -854,10 +857,8 @@ Step 10: 動作確認
 ---
 ## 7. 将来拡張（スコープ外）
 
-- **匹名送信**: 将来「外部公開」「未ログイン投稿解禁」が必要になった時点で再導入する。  
-  実装時は `feedbacks.user_id` の NULL 許容化、`FEEDBACK_SESSION_LIMIT` 定数追加、  
-  `Feedback.count_session_anonymous()` メソッド、フォームへの匿名送信チェックボックスの追加を行う。  
-  `test_create_feedback_anonymous` テストはその隟に有効化する。
+- **未ログイン投稿の解禁（真の匿名送信）**: 将来「外部公開」等で必要になった時点で検討する。  
+    実装時はスパム対策（レート制限、CAPTCHA 等）と、投稿追跡（受付番号方式等）をセットで導入する。
 - **メール通知**: 重要度「致命的」の投稿時に管理者へメール送信（smtplib / SendGrid）
 - **添付画像**: スクリーンショットのアップロード（`st.file_uploader` + クラウドストレージ連携）
 - **公開 FAQ**: 解決済み投稿を FAQ として公開する機能

@@ -39,6 +39,7 @@ bcrypt         4.x      Apache-2.0       https://github.com/pyca/bcrypt
 SQLAlchemy     2.x      MIT License      https://github.com/sqlalchemy/sqlalchemy
 PyMySQL        1.x      MIT License      https://github.com/PyMySQL/PyMySQL
 python-dotenv  1.x      BSD 3-Clause     https://github.com/theskumar/python-dotenv
+pg8000         1.x      BSD 3-Clause     https://codeberg.org/tlocke/pg8000
 
 Each library retains its own license. See each project's repository for
 full license text.

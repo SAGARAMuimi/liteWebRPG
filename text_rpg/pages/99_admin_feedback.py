@@ -79,7 +79,8 @@ else:
         status_label = FEEDBACK_STATUSES.get(fb.status, fb.status)
         sev_label    = FEEDBACK_SEVERITIES.get(fb.severity, fb.severity)
         page_label   = FEEDBACK_PAGE_LABELS.get(fb.page_context, fb.page_context)
-        user_text    = f"UID:{fb.user_id}" if fb.user_id else "—"
+        is_anon = bool(getattr(fb, "is_anonymous", 0)) or (fb.user_id is None)
+        user_text = "匿名" if is_anon else (f"UID:{fb.user_id}" if fb.user_id else "—")
 
         with st.expander(
             f"#{fb.id} | {cat_label} | {fb.title}  [{status_label}]",
@@ -89,6 +90,12 @@ else:
             info_col1.caption(f"👤 投稿者: {user_text}")
             info_col2.caption(f"📍 ページ: {page_label}")
             info_col3.caption(f"⚠️ 深刻度: {sev_label}")
+
+            if bool(getattr(fb, "needs_reply", 0)):
+                st.caption("✉️ 返信希望: はい")
+
+            if is_anon:
+                st.caption("🕶️ 匿名送信: はい（ユーザーID未保存）")
 
             if getattr(fb, "contact_email", None):
                 st.caption(f"📧 連絡先メール: {fb.contact_email}")

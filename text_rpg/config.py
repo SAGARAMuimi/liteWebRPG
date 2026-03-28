@@ -1,14 +1,47 @@
-"""
-config.py - 定数・設定値の一元管理
-"""
+"""config.py - 定数・設定値の一元管理"""
 
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
+
+def _get_setting(key: str, default: str | None = None) -> str | None:
+    """環境変数 → Streamlit secrets → default の順で設定値を取得する。"""
+    env_val = os.getenv(key)
+    if env_val is not None and env_val != "":
+        return env_val
+
+    # Streamlit Community Cloud の Secrets は st.secrets で提供される
+    try:
+        import streamlit as st  # 遅延 import（通常のテスト/CLI 実行でも落ちないように）
+
+        if key in st.secrets:
+            val = st.secrets.get(key)
+            if val is None:
+                return default
+            return str(val)
+    except Exception:
+        pass
+
+    return default
+
+
+# Streamlit からの起動位置に依存せず、text_rpg/.env を確実に読む
+_local_env_path = Path(__file__).with_name(".env")
+load_dotenv(dotenv_path=_local_env_path)
+# 併用運用のため、カレントディレクトリの .env も読めるようにしておく
 load_dotenv()
 
+# ─── 実行プロファイル/認証設定 ─────────────────────────────
+# AUTH_MODE:
+# - auto : DB が postgresql かつ Neon Auth Secrets がある場合のみ neon を選ぶ。なければ local。
+# - local: 常にローカル（このプロジェクト既存の users + bcrypt）
+# - neon : 常に Neon Auth（※未実装のため現時点ではエラーになる）
+AUTH_MODE: str = (_get_setting("AUTH_MODE", "auto") or "auto").strip().lower()
+
 # ─── データベース ───────────────────────────────────────────
-DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./text_rpg.db")
+DATABASE_URL: str = _get_setting("DATABASE_URL", "sqlite:///./text_rpg.db") or "sqlite:///./text_rpg.db"
 
 # ─── クラス定義 ────────────────────────────────────────────
 CLASS_NAMES: dict[str, str] = {
@@ -399,6 +432,106 @@ META_TITLES: dict[str, dict] = {
     "dungeon_cleared": {"label": "👑 ダンジョン征服者", "desc": "ダンジョンをクリアした"},
     "perseverance":    {"label": "💪 不屈の意志",     "desc": "全滅を経験した"},
     "meta_shopper":    {"label": "🛒 強化の探求者",   "desc": "メタショップで初めて強化した"},
+}
+
+# ─── R-14 マップ移動（直角構成）──────────────────────────────────────────────
+
+# セル種別
+CELL_WALL    = 0  # 壁（移動不可）
+CELL_PASSAGE = 1  # 通路（移動可能）
+CELL_START   = 2  # スタート地点（各フロアの入場地点）
+CELL_GOAL    = 3  # ボス部屋 / 次フロアへの扉
+
+# 方向定義（name → (dx, dy)）
+# 北 = Y 減少、南 = Y 増加（左上原点）
+DIRECTIONS: dict[str, tuple[int, int]] = {
+    "north": ( 0, -1),
+    "south": ( 0,  1),
+    "west":  (-1,  0),
+    "east":  ( 1,  0),
+}
+
+DIRECTION_LABELS: dict[str, str] = {
+    "north": "🔼 北",
+    "south": "🔽 南",
+    "west":  "◀️ 西",
+    "east":  "▶️ 東",
+}
+
+DIRECTION_NAMES_JA: dict[str, str] = {
+    "north": "北",
+    "south": "南",
+    "west":  "西",
+    "east":  "東",
+}
+
+# セル種別 → 周辺描写テキスト
+CELL_DESCRIBE: dict[int, str] = {
+    CELL_WALL:    "壁が立ちはだかっている。",
+    CELL_PASSAGE: "暗い通路が続いている。",
+    CELL_GOAL:    "重厚な扉が見える…何かが待ち構えているようだ。",
+    CELL_START:   "来た道が見える。",
+}
+
+# フロアマップ定義（dungeon_id=2「迷宮の神殿」専用）
+# grid: [y][x] の二次元リスト（0=壁, 1=通路, 2=スタート, 3=ゴール）
+# start: (x, y) スタート座標
+# goal:  (x, y) ゴール座標
+# fixed_events: {(x, y): event_type}  指定マスのイベント種別を固定する
+FLOOR_MAPS: dict[int, dict] = {
+    1: {
+        "grid": [
+            #  0  1  2  3  4
+            [  0, 0, 0, 0, 0],  # y=0
+            [  0, 2, 1, 1, 0],  # y=1  S─┬─
+            [  0, 1, 0, 1, 0],  # y=2  │   │
+            [  0, 1, 1, 3, 0],  # y=3  └─┴─G
+            [  0, 0, 0, 0, 0],  # y=4
+        ],
+        "start": (1, 1),
+        "goal":  (3, 3),
+        "fixed_events": {
+            (2, 1): "merchant",  # スタートから東に1マス
+            (3, 2): "shrine",    # ゴールの1マス北
+            (1, 3): "trap",      # ゴールへの南回り
+        },
+    },
+    2: {
+        "grid": [
+            #  0  1  2  3  4  5
+            [  0, 0, 0, 0, 0, 0],  # y=0
+            [  0, 2, 1, 0, 1, 0],  # y=1  S─  ─
+            [  0, 0, 1, 0, 1, 0],  # y=2    │   │
+            [  0, 0, 1, 1, 1, 0],  # y=3    └─┬─┘
+            [  0, 0, 0, 1, 0, 0],  # y=4      │
+            [  0, 0, 0, 3, 0, 0],  # y=5      G
+        ],
+        "start": (1, 1),
+        "goal":  (3, 5),
+        "fixed_events": {
+            (4, 1): "rest",    # 東の行き止まり（休憩）
+            (4, 3): "chest",   # 合流地点の東（宝箱）
+        },
+    },
+    3: {
+        "grid": [
+            #  0  1  2  3  4  5  6
+            [  0, 0, 0, 0, 0, 0, 0],  # y=0
+            [  0, 2, 1, 1, 0, 0, 0],  # y=1  S──
+            [  0, 0, 0, 1, 0, 0, 0],  # y=2     │
+            [  0, 0, 1, 1, 1, 1, 0],  # y=3  ───┼──
+            [  0, 0, 1, 0, 0, 1, 0],  # y=4  │     │
+            [  0, 0, 1, 1, 1, 1, 0],  # y=5  └───┬─┘
+            [  0, 0, 0, 0, 3, 0, 0],  # y=6      G
+        ],
+        "start": (1, 1),
+        "goal":  (4, 6),
+        "fixed_events": {
+            (2, 3): "shrine",    # 西ルートの分岐点
+            (5, 3): "merchant",  # 東ルートの分岐点
+            (2, 5): "rest",      # 南西の行き止まり
+        },
+    },
 }
 
 # ── FEEDBACK 不具合報告・改善要望 ─────────────────────────────────────

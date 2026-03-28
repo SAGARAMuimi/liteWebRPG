@@ -19,6 +19,8 @@ class Feedback(Base):
     title       : Mapped[str]       = mapped_column(String(128), nullable=False)
     body        : Mapped[str]       = mapped_column(Text,        nullable=False)
     contact_email: Mapped[str | None] = mapped_column(String(254), nullable=True)
+    needs_reply : Mapped[int]       = mapped_column(nullable=False, server_default="0")
+    is_anonymous: Mapped[int]       = mapped_column(nullable=False, server_default="0")
     page_context: Mapped[str]       = mapped_column(String(64),  nullable=False, server_default="''")
     severity    : Mapped[str]       = mapped_column(String(16),  nullable=False, server_default="'normal'")
     status      : Mapped[str]       = mapped_column(String(16),  nullable=False, server_default="'open'")
@@ -40,6 +42,8 @@ class Feedback(Base):
         page_context: str = "",
         severity: str = "normal",
         contact_email: str | None = None,
+        needs_reply: bool = False,
+        is_anonymous: bool = False,
     ) -> "Feedback":
         """フィードバックを作成して返す。body が上限超えの場合 ValueError を送出する。"""
         from config import FEEDBACK_MAX_BODY_LENGTH
@@ -57,6 +61,12 @@ class Feedback(Base):
             if not Feedback._EMAIL_RE.match(email_norm):
                 raise ValueError("メールアドレスの形式が正しくありません")
 
+        if needs_reply and email_norm is None:
+            raise ValueError("連絡が必要な場合はメールアドレスを入力してください")
+
+        if is_anonymous:
+            user_id = None
+
         now = datetime.utcnow()
         fb = Feedback(
             user_id=user_id,
@@ -64,6 +74,8 @@ class Feedback(Base):
             title=title.strip(),
             body=body.strip(),
             contact_email=email_norm,
+            needs_reply=1 if needs_reply else 0,
+            is_anonymous=1 if is_anonymous else 0,
             page_context=page_context,
             severity=severity if category == "bug" else "normal",
             status="open",
