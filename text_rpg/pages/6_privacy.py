@@ -88,7 +88,7 @@ if email:
     contact_lines.append(f"- メール: {email}")
 if x_id:
     x_norm = x_id[1:] if x_id.startswith("@") else x_id
-    contact_lines.append(f"- X: @{x_norm}（https://x.com/{x_norm}）")
+    contact_lines.append(f"- X: @{x_norm}（ https://x.com/{x_norm} ）")
 if discord:
     contact_lines.append(f"- Discord: {discord}")
 if legacy:
