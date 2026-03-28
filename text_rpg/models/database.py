@@ -135,14 +135,81 @@ def init_db():
     Base.metadata.create_all(bind=engine)
 
 
+def _add_column_if_not_exists(conn, table: str, column: str, definition: str) -> None:
+    """カラムが存在しない場合のみ ALTER TABLE ADD COLUMN を実行する（方言共通）。"""
+    from sqlalchemy import text
+    dialect = engine.dialect.name
+    try:
+        if dialect == "sqlite":
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+        else:
+            # PostgreSQL / MySQL: 存在確認してから追加
+            conn.execute(text(
+                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}"
+            ))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
+
+def _migrate_postgresql(conn) -> None:
+    """PostgreSQL (Neon) 向けのスキーマ追加マイグレーション。
+
+    init_db() で Base.metadata.create_all() が実行されるため新規テーブルは自動作成済み。
+    ここでは既存テーブルへの「カラム追加のみ」を冪等に行う。
+    """
+    from sqlalchemy import text
+
+    add = lambda t, c, d: _add_column_if_not_exists(conn, t, c, d)  # noqa: E731
+
+    # dungeons
+    add("dungeons", "map_type", "VARCHAR(16) NOT NULL DEFAULT 'linear'")
+
+    # dungeon_progress
+    add("dungeon_progress", "current_x", "INTEGER NOT NULL DEFAULT -1")
+    add("dungeon_progress", "current_y", "INTEGER NOT NULL DEFAULT -1")
+
+    # users
+    add("users", "gold",               "INTEGER NOT NULL DEFAULT 0")
+    add("users", "meta_gold",          "INTEGER NOT NULL DEFAULT 0")
+    add("users", "meta_titles",        "VARCHAR(512) NOT NULL DEFAULT ''")
+    add("users", "meta_upgrade_ranks", "VARCHAR(512) NOT NULL DEFAULT '{}'")
+    add("users", "is_admin",           "INTEGER NOT NULL DEFAULT 0")
+
+    # enemies
+    add("enemies", "gold_reward",        "INTEGER NOT NULL DEFAULT 0")
+    add("enemies", "status_resistance",  "VARCHAR(64) NOT NULL DEFAULT ''")
+    add("enemies", "intelligence",       "INTEGER NOT NULL DEFAULT 2")
+
+    # skills
+    add("skills", "target_type", "VARCHAR(16) NOT NULL DEFAULT 'self'")
+    add("skills", "duration",    "INTEGER NOT NULL DEFAULT 0")
+    add("skills", "cooldown",    "INTEGER NOT NULL DEFAULT 0")
+
+    # characters
+    add("characters", "intelligence", "INTEGER NOT NULL DEFAULT 2")
+
+    # equipments
+    add("equipments", "disposable", "INTEGER NOT NULL DEFAULT 0")
+
+    # feedbacks
+    add("feedbacks", "contact_email", "VARCHAR(254)")
+    add("feedbacks", "needs_reply",   "INTEGER NOT NULL DEFAULT 0")
+    add("feedbacks", "is_anonymous",  "INTEGER NOT NULL DEFAULT 0")
+
+
 def migrate_db() -> None:
     """
     既存 DB へのスキーマ変更・データ修正を冪等に実行する。
     init_db() の直後に呼び出すこと。
     """
-    # この関数は SQLite の既存ファイルDB向けに、SQLite方言の SQL を多用している。
-    # PostgreSQL/MySQL 運用では Alembic 等での正式マイグレーションへ移行する想定とし、
-    # ここでは安全のため何もしない。
+    from sqlalchemy import text
+
+    if engine.dialect.name == "postgresql":
+        with engine.connect() as conn:
+            _migrate_postgresql(conn)
+        return
+
     if engine.dialect.name != "sqlite":
         return
 

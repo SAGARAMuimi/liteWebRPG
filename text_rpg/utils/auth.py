@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
@@ -29,11 +30,8 @@ def _neon_auth_secrets_present() -> bool:
         return True
 
     for key in [
-        # Better Auth では基本的にこれ1つ（認証サーバの base URL）
         "NEON_AUTH_BASE_URL",
-        "NEON_AUTH_JWKS_URL",
-        "NEON_AUTH_PUBLIC_KEY",
-        "NEON_AUTH_PROJECT_ID",
+        "NEON_AUTH_JWKS_URL",  # JWT plugin 有効時は JWKS エンドポイントも実在する
         "NEON_AUTH_API_KEY",
     ]:
         val = _get_setting(key)
@@ -168,6 +166,85 @@ def neon_get_session(session_token: str) -> dict[str, Any] | None:
     return data
 
 
+_NEON_SESSION_REVALIDATE_INTERVAL = 300  # 5分ごとに再検証（秒）
+
+
+def _neon_jwks_url() -> str:
+    """NEON_AUTH_JWKS_URL を返す。未設定なら BASE_URL から自動生成する。"""
+    from config import _get_setting
+    url = (_get_setting("NEON_AUTH_JWKS_URL") or "").strip()
+    if url:
+        return url
+    base = _neon_base_url()
+    if base:
+        return base.rstrip("/") + "/.well-known/jwks.json"
+    return ""
+
+
+def _neon_verify_jwt_local(token: str) -> dict[str, Any] | None:
+    """PyJWT + JWKS で JWT をローカル検証する。
+
+    成功時は payload dict、失敗時は None を返す。
+    PyJWT[crypto] が未インストールの場合は None を返す（フォールバック流に任せる）。
+    """
+    jwks_url = _neon_jwks_url()
+    if not jwks_url or not token:
+        return None
+    try:
+        import jwt as pyjwt
+        from jwt import PyJWKClient
+        jwks_client = PyJWKClient(jwks_url, cache_keys=True)
+        signing_key = jwks_client.get_signing_key_from_jwt(token)
+        payload = pyjwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["EdDSA", "RS256", "ES256"],
+            options={"verify_aud": False},  # Better Auth は aud を含まない場合あり
+        )
+        return payload
+    except Exception:
+        return None
+
+
+def _neon_validate_session_if_needed() -> bool:
+    """Neon Auth バックエンド時、トークンを再検証する。
+
+    優先順位:
+      1. JWKS が利用可能ならローカル JWT 検証（HTTPコール不要、高速）
+      2. JWKS がなければ GET /get-session でチェック（フォールバック）
+    - neon 以外のバックエンドでは常に True
+    - _NEON_SESSION_REVALIDATE_INTERVAL 秒未満ならスキップ
+    - 失効の場合はセッションを全クリアして False
+    """
+    if st.session_state.get("auth_backend") != "neon":
+        return True
+
+    token = st.session_state.get("neon_token")
+    if not token:
+        return False
+
+    last_validated: float = st.session_state.get("neon_token_validated_at", 0.0)
+    if time.time() - last_validated < _NEON_SESSION_REVALIDATE_INTERVAL:
+        return True  # 検証済み期間内
+
+    # ① JWKS ローカル検証
+    payload = _neon_verify_jwt_local(token)
+    if payload is not None:
+        st.session_state["neon_token_validated_at"] = time.time()
+        return True
+
+    # ② JWKS 検証失敗 or 未設定 → GET /get-session でフォールバック
+    session_data = neon_get_session(token)
+    if session_data:
+        st.session_state["neon_token_validated_at"] = time.time()
+        return True
+
+    # トークン失効 → 強制ログアウト
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    return False
+
+
 def init_session_defaults() -> None:
     """セッション状態のデフォルト値を初期化する"""
     defaults: dict = {
@@ -199,6 +276,10 @@ def check_login() -> None:
     init_session_defaults()
     if not st.session_state.get("user_id"):
         st.warning("ログインが必要です。")
+        st.page_link("app.py", label="ログイン画面へ")
+        st.stop()
+    if not _neon_validate_session_if_needed():
+        st.warning("セッションが期限切れです。再ログインしてください。")
         st.page_link("app.py", label="ログイン画面へ")
         st.stop()
 
