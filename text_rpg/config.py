@@ -139,6 +139,14 @@ PARTY_SIZE: int = 4
 # ─── UI設定 ───────────────────────────────────────────────
 APP_TITLE: str = "⚔️ liteWebRPG"
 
+# ─── お知らせ（R-16） ─────────────────────────────────────────
+# NOTICE_TEXT: 表示するお知らせ文。空文字 / 未設定の場合は非表示。
+# NOTICE_LEVEL: "info"（青）/ "warning"（黄）/ "error"（赤）のいずれか。デフォルト "info"。
+# Streamlit Cloud の Secrets または環境変数で設定する。
+# 例: NOTICE_TEXT = "2025-04-01 にメンテナンスのためログアウトが発生する場合があります。"
+NOTICE_TEXT: str = _get_setting("NOTICE_TEXT", "") or ""
+NOTICE_LEVEL: str = (_get_setting("NOTICE_LEVEL", "info") or "info").strip().lower()
+
 # ─── 運営者・プライバシー（個人運用向け） ─────────────────────────────
 # 表示名（例: "運営者" やハンドルネーム）
 OPERATOR_NAME: str = os.getenv("OPERATOR_NAME", "運営者")
