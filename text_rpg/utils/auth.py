@@ -319,9 +319,13 @@ def login_user(db: Session, username: str, password: str) -> bool:
             return False
 
         url = urljoin(base + "/", "sign-in/email")
-        body: dict[str, Any] = {"email": email, "password": password}
+        # callbackURL は絶対 URL が必須。未指定または相対 URL の場合は Origin ヘッダーも必須。
+        from urllib.parse import urlsplit as _urlsplit
+        _parts = _urlsplit(base)
+        _origin = f"{_parts.scheme}://{_parts.netloc}"
+        body: dict[str, Any] = {"email": email, "password": password, "callbackURL": base}
 
-        headers: dict[str, str] = {}
+        headers: dict[str, str] = {"Origin": _origin}
         admin_token = _neon_admin_bearer_token()
         if admin_token:
             headers["Authorization"] = f"Bearer {admin_token}"
@@ -387,9 +391,13 @@ def register_user(db: Session, username: str, password: str, *, email: str | Non
             return False, "表示名・メールアドレス・パスワードを入力してください。"
 
         url = urljoin(base + "/", "sign-up/email")
-        body: dict[str, Any] = {"name": display_name, "email": email_addr, "password": password}
+        # callbackURL は絶対 URL が必須。未指定または相対 URL の場合は Origin ヘッダーも必須。
+        from urllib.parse import urlsplit as _urlsplit
+        _parts = _urlsplit(base)
+        _origin = f"{_parts.scheme}://{_parts.netloc}"
+        body: dict[str, Any] = {"name": display_name, "email": email_addr, "password": password, "callbackURL": base}
 
-        headers: dict[str, str] = {}
+        headers: dict[str, str] = {"Origin": _origin}
         admin_token = _neon_admin_bearer_token()
         if admin_token:
             headers["Authorization"] = f"Bearer {admin_token}"
