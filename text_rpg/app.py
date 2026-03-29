@@ -10,7 +10,7 @@ import streamlit as st
 from models.database import init_db, migrate_db, SessionLocal
 from utils.auth import init_session_defaults, login_user, register_user, logout_user, get_auth_backend
 from utils.helpers import seed_initial_data
-from config import APP_TITLE
+from config import APP_TITLE, NOTICE_TEXT, NOTICE_LEVEL
 
 # ─── 初期化 ──────────────────────────────────────────────
 st.set_page_config(page_title=APP_TITLE, page_icon="⚔️", layout="centered")
@@ -21,6 +21,12 @@ auth_backend = get_auth_backend()
 
 with SessionLocal() as db:
     seed_initial_data(db)
+
+# ─── お知らせ（R-16） ────────────────────────────────────
+# NOTICE_TEXT が設定されている場合のみ表示（ログイン前後どちらでも表示）
+if NOTICE_TEXT:
+    _notice_fn = {"warning": st.warning, "error": st.error}.get(NOTICE_LEVEL, st.info)
+    _notice_fn(f"📢 {NOTICE_TEXT}")
 
 # ─── ログイン済みの場合はキャラクター画面へ ─────────────────
 if st.session_state.get("user_id"):
@@ -61,6 +67,10 @@ with tab_login:
                 st.rerun()
             else:
                 st.error("ユーザー名またはパスワードが違います。")
+                # Neon Auth バックエンドのエラー詳細（デバッグ用）
+                _neon_err = st.session_state.pop("_neon_login_error", None)
+                if _neon_err:
+                    st.caption(f"🔍 詳細: {_neon_err}")
 
 with tab_register:
     st.subheader("新規登録")

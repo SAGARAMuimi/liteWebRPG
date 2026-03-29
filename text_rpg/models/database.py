@@ -112,6 +112,9 @@ else:
 engine = create_engine(
     _db_url,
     connect_args=_build_connect_args(_db_url, _sslmode),
+    # Neon など クラウド DB はアイドル時に接続を切断するため、
+    # プールから取り出す前に死活確認して自動再接続させる。
+    pool_pre_ping=True,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
 
