@@ -355,6 +355,7 @@ def login_user(db: Session, username: str, password: str) -> bool:
         st.session_state["auth_backend"] = "neon"
         st.session_state["neon_token"] = str(token)
         st.session_state["neon_user"] = neon_user
+        st.session_state["neon_token_validated_at"] = time.time()  # BUG-01: 直後の遷移でセッション切れ扱いになるのを防ぐ
         return True
 
     from models.user import User
@@ -436,6 +437,7 @@ def register_user(db: Session, username: str, password: str, *, email: str | Non
                 st.session_state["username"] = mapped_name
                 st.session_state["auth_backend"] = "neon"
                 st.session_state["neon_token"] = str(token)
+                st.session_state["neon_token_validated_at"] = time.time()  # BUG-01: 直後の遷移でセッション切れ扱いになるのを防ぐ
                 if isinstance(neon_user, dict):
                     st.session_state["neon_user"] = neon_user
             return True, "登録しました！"
