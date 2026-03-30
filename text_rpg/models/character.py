@@ -97,9 +97,8 @@ class Character(Base):
             for stat, (mn, mx) in growth_cfg.items():
                 val = random.randint(mn, mx)
                 if stat == "intelligence":
-                    # 上限 10 でクランプ
                     old = getattr(self, stat, 0)
-                    new = min(10, old + val)
+                    new = old + val
                     setattr(self, stat, new)
                     deltas[stat] += new - old
                 else:
@@ -122,7 +121,7 @@ class Character(Base):
             delta = random.randint(mn, mx)
             if stat == "intelligence":
                 old = getattr(self, stat, 0)
-                setattr(self, stat, min(10, old + delta))
+                setattr(self, stat, old + delta)
             else:
                 setattr(self, stat, getattr(self, stat) + delta)
         # レベルアップ時に HP / MP を全回復

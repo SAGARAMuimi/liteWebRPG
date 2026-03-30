@@ -378,7 +378,11 @@ if auto_mode:
                 _skills = Skill.get_for_class(db, _ac.class_type)
             _msg = engine.ally_auto_action(
                         _ac, _pol, _skills,
-                        intelligence=CLASS_INTELLIGENCE.get(_ac.class_type, 5)
+                        intelligence=getattr(
+                            _ac,
+                            "intelligence",
+                            CLASS_INTELLIGENCE.get(_ac.class_type, 5),
+                        )
                     )
             st.session_state["battle_log"].append(_msg)
             _live.info(f"🗡️ {_msg}")

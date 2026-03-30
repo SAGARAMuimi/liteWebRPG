@@ -174,6 +174,11 @@ DIFFICULTY_PRESETS: dict[str, dict] = {
     "hard":   {"label": "🔴 むずかしい", "enemy_hp_mult": 1.5, "enemy_atk_mult": 1.2, "exp_mult": 0.8, "heal_mult": 0.8, "gold_mult": 0.8},
 }
 
+# 回復系スキルの INT ベース計算式（案B）
+# 実回復量 = (skill.power + HEAL_SKILL_INT_BASE_OFFSET + intelligence * HEAL_SKILL_INT_SCALE) * heal_mult
+HEAL_SKILL_INT_BASE_OFFSET: int = -4
+HEAL_SKILL_INT_SCALE: int = 2
+
 # ─── 状態異常定義 ────────────────────────────────────────────
 STATUS_AILMENTS: dict[str, dict] = {
     "poison":   {"icon": "☠️",  "label": "毒"},

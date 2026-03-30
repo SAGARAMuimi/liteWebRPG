@@ -424,13 +424,13 @@ class TestLevelUpPlans:
         # support の intelligence growth = (1, 1) → 必ず +1
         assert chara.intelligence == old_intel + 1
 
-    def test_levelup_support_intelligence_capped_at_10(self, db):
-        """intelligence=10 で support プランを適用しても 10 を超えないこと"""
+    def test_levelup_support_intelligence_can_exceed_10(self, db):
+        """intelligence=10 で support プランを適用すると 11 になること"""
         user  = User.create(db, "lv_cap", "pass")
         chara = Character.create(db, user.id, "賢者上限", "priest")
         chara.intelligence = 10
         chara.apply_growth(db, "support", times=1)
-        assert chara.intelligence == 10  # クランプ済み
+        assert chara.intelligence == 11
 
 
 class TestMetaProgression:

@@ -1,0 +1,7 @@
+id,name,description,effect_type,power,target_type,duration,price
+1,ポーション,HPを30回復する,heal_hp,30,ally,0,50
+2,ハイポーション,HPを80回復する,heal_hp,80,ally,0,150
+3,エーテル,MPを20回復する,heal_mp,20,ally,0,80
+4,万能薬,状態異常を全て回復する,cure,0,ally,0,100
+5,フェニックスの羽,戦闘不能を蘇生（HP30%）,revive,30,ally,0,200
+6,活力の薬,ATKを3上昇（3ターン）,buff_atk,3,self,3,120
