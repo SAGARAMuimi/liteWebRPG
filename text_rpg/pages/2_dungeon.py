@@ -14,6 +14,7 @@ from models.dungeon import Dungeon, DungeonProgress
 from models.character import PartyMember
 from models.item import Item
 from models.inventory import Inventory
+from models.equipment import Equipment, CharacterEquipment
 from models.user import User
 from game.dungeon import DungeonManager
 from game.map_manager import MapManager
@@ -21,7 +22,7 @@ from utils.auth import check_login, get_current_user_id
 from utils.helpers import hp_bar, class_display_name
 from config import (
     APP_TITLE, ROOMS_PER_FLOOR, DIFFICULTY_PRESETS,
-    DIRECTION_LABELS, FLOOR_MAPS,
+    DIRECTION_LABELS, FLOOR_MAPS, EXP_PER_LEVEL,
 )
 
 st.set_page_config(page_title=f"ダンジョン探索 | {APP_TITLE}", page_icon="🏰", layout="wide")
@@ -40,6 +41,20 @@ if not st.session_state.get("party"):
     st.session_state["party"] = party
 
 party = st.session_state["party"]
+
+# ─── 装備キャッシュ（party_equipment）──────────────────────────
+if "party_equipment" not in st.session_state:
+    with SessionLocal() as db:
+        _all_equips_map = {e.id: e for e in Equipment.get_all(db)}
+        _party_equip_cache: dict = {}
+        for _c in party:
+            _slots: dict = {}
+            for _ce in CharacterEquipment.get_for_character(db, _c.id):
+                _eq = _all_equips_map.get(_ce.equipment_id)
+                if _eq:
+                    _slots[_ce.slot] = _eq.name
+            _party_equip_cache[_c.id] = _slots
+    st.session_state["party_equipment"] = _party_equip_cache
 
 # ─── session_state の初期化（共通） ───────────────────────────
 # ミュータブルな値（list など）を毎回新しいオブジェクトで返すファクトリ関数
@@ -130,6 +145,15 @@ def _render_party_status(party_list: list) -> None:
             st.caption(class_display_name(chara.class_type))
             st.text(hp_bar(chara.hp, chara.max_hp))
             st.text(f"MP {chara.mp}/{chara.max_mp}  Lv{chara.level}")
+            st.text(f"ATK {chara.attack}  DEF {chara.defense}")
+            with st.expander("詳細 ▼"):
+                _exp_to_next = chara.level * EXP_PER_LEVEL - chara.exp
+                st.text(f"Lv {chara.level}  EXP {chara.exp} / {chara.level * EXP_PER_LEVEL}（残 {_exp_to_next}）")
+                st.text(f"INT {chara.intelligence}")
+                _equip_slots = st.session_state.get("party_equipment", {}).get(chara.id, {})
+                st.text(f"⚔️  武器: {_equip_slots.get('weapon', 'なし')}")
+                st.text(f"🛡️  防具: {_equip_slots.get('armor', 'なし')}")
+                st.text(f"💍  アクセサリ: {_equip_slots.get('accessory', 'なし')}")
 
 
 def _render_merchant_shop(uid: int, dungeon_log: list) -> None:
