@@ -126,6 +126,12 @@ CLASS_DEFAULT_LEVELUP_PLAN: dict[str, str] = {
 }
 
 # ─── ダンジョン設定 ────────────────────────────────────────
+# ダンジョンID → 推奨パーティ平均レベル（R-23 入場前チェック）
+DUNGEON_RECOMMENDED_LEVEL: dict[int, int] = {
+    1: 1,  # 旅立ちの洞窟（初心者向け・Lv1 から挑戦可）
+    2: 4,  # 迷宮の神殿（中級・Lv4 以上推奨）
+}
+
 ENCOUNTER_RATE: dict[int, float] = {1: 0.6, 2: 0.7, 3: 0.8}
 ENCOUNTER_COUNT: dict[int, tuple[int, int]] = {
     1: (1, 2),  # 1F: 1〜2体

@@ -23,6 +23,7 @@ from utils.helpers import hp_bar, class_display_name
 from config import (
     APP_TITLE, ROOMS_PER_FLOOR, DIFFICULTY_PRESETS,
     DIRECTION_LABELS, FLOOR_MAPS, EXP_PER_LEVEL,
+    DUNGEON_RECOMMENDED_LEVEL,
 )
 
 st.set_page_config(page_title=f"ダンジョン探索 | {APP_TITLE}", page_icon="🏰", layout="wide")
@@ -86,6 +87,10 @@ def render_dungeon_select(uid: int) -> None:
     st.subheader("🗺️ ダンジョンを選択してください")
     st.divider()
 
+    # R-23: パーティ平均レベルを算出（ダンジョン選択前に一度だけ計算）
+    _party = st.session_state.get("party", [])
+    _avg_lv = sum(c.level for c in _party) / len(_party) if _party else 1.0
+
     with SessionLocal() as db:
         dungeons = Dungeon.get_all(db)
         prog1 = DungeonProgress.get_or_create(db, uid, 1)
@@ -108,6 +113,15 @@ def render_dungeon_select(uid: int) -> None:
         map_label   = "グリッド探索" if data["map_type"] == "grid" else "線形探索"
         state_label = "✅ クリア済み" if data["is_cleared"] else f"📍 {data['current_floor']}F 探索中"
 
+        # R-23: 推奨レベル判定
+        _rec_lv = DUNGEON_RECOMMENDED_LEVEL.get(data["id"], 1)
+        if _avg_lv >= _rec_lv:
+            _lv_badge = f"✅ 推奨Lv {_rec_lv}（平均Lv {_avg_lv:.1f}・余裕あり）"
+        elif _avg_lv >= _rec_lv - 2:
+            _lv_badge = f"⚠️ 推奨Lv {_rec_lv}（平均Lv {_avg_lv:.1f}・やや低い）"
+        else:
+            _lv_badge = f"🔴 推奨Lv {_rec_lv}（平均Lv {_avg_lv:.1f}・レベル不足）"
+
         with st.container(border=True):
             col_info, col_btn = st.columns([4, 1])
             with col_info:
@@ -117,6 +131,7 @@ def render_dungeon_select(uid: int) -> None:
                 else:
                     st.markdown(f"### {data['name']}")
                     st.caption(f"{map_icon} {map_label}  |  {data['floor']}F 構成  |  {state_label}")
+                    st.caption(_lv_badge)
             with col_btn:
                 st.write("")
                 if is_locked:
