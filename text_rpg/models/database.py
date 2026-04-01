@@ -178,6 +178,7 @@ def _migrate_postgresql(conn) -> None:
     add("users", "meta_titles",        "VARCHAR(512) NOT NULL DEFAULT ''")
     add("users", "meta_upgrade_ranks", "VARCHAR(512) NOT NULL DEFAULT '{}'")
     add("users", "is_admin",           "INTEGER NOT NULL DEFAULT 0")
+    add("users", "battle_speed",       "VARCHAR(8) NOT NULL DEFAULT 'normal'")
 
     # enemies
     add("enemies", "gold_reward",        "INTEGER NOT NULL DEFAULT 0")
@@ -556,3 +557,11 @@ def migrate_db() -> None:
                 conn.commit()
             except Exception:
                 conn.rollback()
+        # ── R-28 バトルスピード設定 ────────────────────────────────────
+        try:
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN battle_speed VARCHAR(8) NOT NULL DEFAULT 'normal'"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()

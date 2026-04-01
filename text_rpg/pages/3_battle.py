@@ -90,8 +90,10 @@ if "auto_battle_enabled" not in st.session_state:
     st.session_state["auto_battle_enabled"] = False
 if "ally_policies" not in st.session_state:
     st.session_state["ally_policies"] = {}
-if "auto_turn_wait" not in st.session_state:
-    st.session_state["auto_turn_wait"] = 5
+if "battle_speed" not in st.session_state:
+    # DB からバトルスピード設定を読み込む（R-28）
+    with SessionLocal() as _spd_db:
+        st.session_state["battle_speed"] = User.get_battle_speed(_spd_db, user_id)
 if "party_equipment" not in st.session_state:
     st.session_state["party_equipment"] = {}
 
@@ -376,17 +378,26 @@ if auto_mode:
                     key=f"policy_{_pc.id}",
                 )
                 st.session_state["ally_policies"][_pc.id] = _chosen
-        # 待機秒数スライダー
-        st.session_state["auto_turn_wait"] = st.slider(
-            "⏱️ 待機秒数（行動ごと）",
-            min_value=1, max_value=10,
-            value=st.session_state["auto_turn_wait"],
-            step=1,
-            key="wait_slider",
+        # バトルスピード選択（R-28）
+        _SPEED_OPTIONS = {"fast": "⚡ 速い", "normal": "▶️ 普通", "slow": "🐢 遅い"}
+        _speed_keys = list(_SPEED_OPTIONS.keys())
+        _cur_speed = st.session_state.get("battle_speed", "normal")
+        _chosen_speed = st.radio(
+            "⚡ バトルスピード",
+            _speed_keys,
+            index=_speed_keys.index(_cur_speed) if _cur_speed in _speed_keys else 1,
+            format_func=lambda k: _SPEED_OPTIONS[k],
+            horizontal=True,
+            key="speed_radio",
         )
+        if _chosen_speed != _cur_speed:
+            st.session_state["battle_speed"] = _chosen_speed
+            with SessionLocal() as db:
+                User.set_battle_speed(db, user_id, _chosen_speed)
 
+    _SPEED_SECONDS = {"fast": 0.5, "normal": 1.5, "slow": 3.0}
     if st.button("▶ 全員行動", use_container_width=True, type="primary"):
-        _wait = st.session_state["auto_turn_wait"]
+        _wait = _SPEED_SECONDS.get(st.session_state.get("battle_speed", "normal"), 1.5)
         _live = st.empty()  # ライブ表示プレースホルダー
         # ── 味方1人行動 → 敵全員行動 を人数分繰り返す ──
         for _ac in alive_party:
