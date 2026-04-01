@@ -166,7 +166,28 @@ def neon_get_session(session_token: str) -> dict[str, Any] | None:
     return data
 
 
-_NEON_SESSION_REVALIDATE_INTERVAL = 300  # 5分ごとに再検証（秒）
+_NEON_SESSION_REVALIDATE_INTERVAL = 900  # 15分ごとに再検証（秒）
+
+
+def _neon_check_token_status(token: str) -> str:
+    """トークンの有効性を GET /get-session で確認する。
+
+    Returns:
+        "valid"   : 200 → 有効
+        "invalid" : 401 / 403 → 確実に失効
+        "error"   : 0 / 5xx / ネットワーク障害 → 判定不能（セッション継続）
+    """
+    base = _neon_base_url()
+    if not base or not token:
+        return "error"
+    url = urljoin(base + "/", "get-session")
+    status, data = _http_json("GET", url, headers={"Authorization": f"Bearer {token}"}, body=None)
+    if status == 200 and isinstance(data, dict):
+        return "valid"
+    if status in (401, 403):
+        return "invalid"
+    # 0=ネットワークエラー, 5xx=サーバー障害 → 判定不能
+    return "error"
 
 
 def _neon_jwks_url() -> str:
@@ -227,19 +248,23 @@ def _neon_validate_session_if_needed() -> bool:
     if time.time() - last_validated < _NEON_SESSION_REVALIDATE_INTERVAL:
         return True  # 検証済み期間内
 
-    # ① JWKS ローカル検証
+    # ① JWKS ローカル検証（HTTP コール不要・高速）
     payload = _neon_verify_jwt_local(token)
     if payload is not None:
         st.session_state["neon_token_validated_at"] = time.time()
         return True
 
-    # ② JWKS 検証失敗 or 未設定 → GET /get-session でフォールバック
-    session_data = neon_get_session(token)
-    if session_data:
+    # ② API で確認（valid / invalid / error の 3 値判定）
+    token_status = _neon_check_token_status(token)
+    if token_status == "valid":
+        st.session_state["neon_token_validated_at"] = time.time()
+        return True
+    if token_status == "error":
+        # ネットワーク障害・5xx など判定不能 → セッション維持してタイマーをリセット
         st.session_state["neon_token_validated_at"] = time.time()
         return True
 
-    # トークン失効 → 強制ログアウト
+    # token_status == "invalid"（401/403）→ 確実に失効 → 強制ログアウト
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     return False
@@ -355,6 +380,7 @@ def login_user(db: Session, username: str, password: str) -> bool:
         st.session_state["auth_backend"] = "neon"
         st.session_state["neon_token"] = str(token)
         st.session_state["neon_user"] = neon_user
+        st.session_state["neon_token_validated_at"] = time.time()  # BUG-01: 直後の遷移でセッション切れ扱いになるのを防ぐ
         return True
 
     from models.user import User
@@ -436,6 +462,7 @@ def register_user(db: Session, username: str, password: str, *, email: str | Non
                 st.session_state["username"] = mapped_name
                 st.session_state["auth_backend"] = "neon"
                 st.session_state["neon_token"] = str(token)
+                st.session_state["neon_token_validated_at"] = time.time()  # BUG-01: 直後の遷移でセッション切れ扱いになるのを防ぐ
                 if isinstance(neon_user, dict):
                     st.session_state["neon_user"] = neon_user
             return True, "登録しました！"

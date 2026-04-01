@@ -189,6 +189,7 @@ class Character(Base):
     max_mp: int
     attack: int
     defense: int
+    intelligence: int  # 味方AI判断・回復スキル計算用の知性値
 
     # メソッド
     def is_alive(self) -> bool
@@ -218,6 +219,7 @@ class Enemy(Base):
     attack: int
     defense: int
     exp_reward: int
+    intelligence: int  # 敵AI判断用の知性値
     is_boss: bool
 
     # メソッド
@@ -235,7 +237,7 @@ class Skill(Base):
     class_type: str       # 使用可能クラス（"mage" など、"all" で全クラス）
     mp_cost: int
     power: int
-    effect_type: str      # "attack" | "heal" | "buff"
+    effect_type: str      # "attack" | "heal" | "buff" | "cure" など
 ```
 
 ### 3.5 models/dungeon.py
@@ -261,32 +263,59 @@ class DungeonProgress(Base):
 
 ```python
 class BattleEngine:
-    def __init__(self, party: list[Character], enemies: list[Enemy]):
+    def __init__(
+        self,
+        party: list[Character],
+        enemies: list[Enemy],
+        heal_mult: float = 1.0,
+        exp_mult: float = 1.0,
+    ):
         self.party = party
         self.enemies = enemies
         self.turn = 1
         self.log: list[str] = []
 
-    def player_action(self, character: Character, action: str, skill: Skill | None, target: Enemy) -> str
+    def player_action(
+        self,
+        character: Character,
+        action: str,
+        target: Enemy | Character | None = None,
+        skill: Skill | None = None,
+    ) -> str:
         """
         action: "attack" | "skill" | "defend"
         戦闘ログメッセージを返す
         """
 
-    def enemy_action(self) -> list[str]
+    def enemy_action(self) -> list[str]:
         """
-        全生存敵がランダムなパーティメンバーに攻撃
+        全生存敵がAIに基づいて行動する
         戦闘ログメッセージのリストを返す
         """
 
-    def calc_damage(self, attacker_atk: int, defender_def: int) -> int
+    def use_item(self, character: Character, item, target: Character | None = None) -> str:
+        """戦闘中にアイテムを使用する"""
+
+    def calc_damage(self, attacker_atk: int, defender_def: int) -> int:
         """
         ダメージ計算式: max(1, attacker_atk - defender_def) + random(-2, 2)
         """
 
-    def is_party_wiped(self) -> bool
-    def is_all_enemies_dead(self) -> bool
-    def get_total_exp(self) -> int
+    def calc_skill_damage(self, attacker_atk: int, skill_power: int, defender_def: int) -> int:
+        """スキル攻撃ダメージ計算式: max(1, attack + skill.power - defense)"""
+
+    def calc_heal_amount(self, skill_power: int, intelligence: int, heal_mult: float) -> int:
+        """
+        回復計算式: (skill.power + offset + intelligence * scale) * heal_mult
+        offset / scale は config.py の定数で調整する
+        """
+
+    def ally_auto_action(self, character: Character, policy: str, skills: list, intelligence: int = 5) -> str:
+        """味方AIの自動行動を実行する"""
+
+    def is_party_wiped(self) -> bool:
+    def is_all_enemies_dead(self) -> bool:
+    def get_total_exp(self) -> int:
         """撃破した敵の合計経験値を返す"""
 ```
 
@@ -385,7 +414,7 @@ skills（クラス属性による論理関連）
 | 2  | ヒール       | priest    | 8       | 40    | heal        |
 | 3  | バックスタブ | thief     | 6       | 25    | attack      |
 | 4  | チャージ     | warrior   | 5       | 20    | attack      |
-| 5  | ポーション   | all       | 0       | 30    | heal        |
+| 5  | 応急手当     | all       | 0       | 30    | heal        |
 
 ---
 
@@ -399,6 +428,19 @@ skills（クラス属性による論理関連）
 | 魔法使い   | mage      | 70     | 80     | 10     | 5       |
 | 盗賊       | thief     | 90     | 40     | 16     | 8       |
 | 僧侶       | priest    | 100    | 60     | 12     | 10      |
+
+### 5.1.1 クラス別初期知性値
+
+| クラス     | class_type | intelligence |
+|-----------|-----------|--------------|
+| 戦士       | warrior   | 2            |
+| 武道家     | monk      | 2            |
+| 騎士       | knight    | 5            |
+| 弓使い     | archer    | 5            |
+| 盗賊       | thief     | 5            |
+| 魔法使い   | mage      | 8            |
+| 僧侶       | priest    | 8            |
+| 吟遊詩人   | bard      | 8            |
 
 ### 5.2 レベルアップ設定
 
@@ -423,6 +465,19 @@ $$
 $$
 \text{damage} = \max(1,\ \text{attack} + \text{skill.power} - \text{defense})
 $$
+
+### 5.3.1 回復スキル計算式
+
+回復系スキル（`effect_type = "heal"`）は INT ベースで計算する。
+
+$$
+    ext{heal} = \max\left(1,\ \left(\text{skill.power} + \text{HEAL\_SKILL\_INT\_BASE\_OFFSET} + \text{intelligence} \times \text{HEAL\_SKILL\_INT\_SCALE}\right) \times \text{heal\_mult}\right)
+$$
+
+- `HEAL_SKILL_INT_BASE_OFFSET = -4`
+- `HEAL_SKILL_INT_SCALE = 2`
+- 知性値が 10 を超える場合も、回復量計算にはその値をそのまま使う
+- アイテム回復は固定値
 
 ### 5.4 エンカウント設定
 
@@ -467,12 +522,14 @@ $$
         ├→ 行動選択: スキル
         │     ├→ スキル選択画面表示
         │     ├→ MP 消費
-        │     └→ 効果適用（attack: ダメージ / heal: HP回復 / buff: ステータス強化）
+      │     └→ 効果適用（attack / heal / cure / buff / 状態異常）
+      ├→ 行動選択: アイテム
+      │     └→ use_item() で固定回復 / 状態異常回復 / 蘇生などを適用
         └→ 行動選択: 防御
               └→ 次のターン中、防御力 2倍 で被ダメ軽減
 
   └→ 敵ターン（全生存敵が順番に行動）
-        └→ ランダムなパーティメンバーに通常攻撃
+      └→ EnemyAI に基づいて単体攻撃 / 全体攻撃 / 状態異常 / バフ / 自己回復
 
   └→ 勝敗判定
         ├→ 全敵撃破 → 勝利
@@ -488,6 +545,7 @@ gain_exp(amount)
         ├→ YES: level_up() 呼び出し
         │         └→ level += 1
         │         └→ 各パラメータにランダム成長値を加算
+    │         └→ support プランでは intelligence が +1 成長する場合がある
         │         └→ hp / mp を max_hp / max_mp に回復
         │         └→ DB に保存
         └→ NO: DB に exp のみ保存

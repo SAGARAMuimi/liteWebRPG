@@ -103,9 +103,18 @@ class TestSkillAction:
 
     def test_heal_skill_restores_hp(self):
         self.chara.hp = 50
+        self.chara.intelligence = 8
         skill = self._make_skill("heal", mp_cost=8, power=30)
         self.engine.player_action(self.chara, "skill", target=self.chara, skill=skill)
         assert self.chara.hp > 50
+
+    def test_heal_skill_uses_intelligence_formula(self):
+        self.chara.hp = 20
+        self.chara.max_hp = 100
+        self.chara.intelligence = 8
+        skill = self._make_skill("heal", mp_cost=8, power=30)
+        self.engine.player_action(self.chara, "skill", target=self.chara, skill=skill)
+        assert self.chara.hp == 62
 
     def test_skill_fails_if_no_mp(self):
         self.chara.mp = 0
@@ -685,7 +694,7 @@ class TestAllyAutoAction:
     """BattleEngine.ally_auto_action() の動作確認"""
 
     def _make_char(self, name="勇者", class_type="warrior", hp=100, mp=30,
-                   attack=15, defense=8, char_id=1) -> Character:
+                   attack=15, defense=8, char_id=1, intelligence=5) -> Character:
         c = Character()
         c.id = char_id
         c.name = name
@@ -696,6 +705,7 @@ class TestAllyAutoAction:
         c.max_mp = mp
         c.attack = attack
         c.defense = defense
+        c.intelligence = intelligence
         c.level = 1
         c.exp = 0
         return c
@@ -1087,8 +1097,8 @@ class TestAllyIntelligenceGrowth:
         assert "ヒール" in msg
 
     # ── レベルアップ: intelligence クランプ ───────────────────────────────
-    def test_levelup_support_capped_at_10(self):
-        """intelligence=10 で support プランにレベルアップしても 10 を超えないこと"""
+    def test_levelup_support_can_exceed_10(self):
+        """intelligence=10 で support プランにレベルアップすると 11 以上になること"""
         c = Character()
         c.id = 1; c.name = "賢者"; c.class_type = "priest"
         c.hp = 100; c.max_hp = 100
@@ -1097,7 +1107,12 @@ class TestAllyIntelligenceGrowth:
         c.level = 1; c.exp = 0
         c.intelligence = 10
         c.level_up("support")
-        assert c.intelligence == 10
+        assert c.intelligence == 11
+
+    def test_calc_heal_threshold_clamps_over_10(self):
+        """AI 用しきい値計算は intelligence=10超を 10 として扱うこと"""
+        from game.battle import calc_heal_threshold
+        assert abs(calc_heal_threshold(12, "hurt") - calc_heal_threshold(10, "hurt")) < 1e-9
 
     def test_levelup_power_no_intel_growth(self):
         """power プランのレベルアップで intelligence が変化しないこと"""

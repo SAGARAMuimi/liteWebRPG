@@ -116,7 +116,9 @@ UI から独立したバトルロジック。`party: list[Character]` と `enemi
 3. `ENEMY_AI_ACTIONS["default"]` にフォールバックするため未登録の敵名は通常攻撃のみになる
 
 **味方 AI の回復しきい値** は `calc_heal_threshold(intelligence, "critical"|"hurt")` で線形補間して取得。  
-知性値（1〜10）は `CLASS_INTELLIGENCE` で定義され、`support` プランのレベルアップで +1 成長する。
+知性値は `CLASS_INTELLIGENCE` で定義され、`support` プランのレベルアップで +1 成長する。10 を超えても保持されるが、AI 判断では 10 として扱う。
+
+**回復系スキルの実回復量** は `HEAL_SKILL_INT_BASE_OFFSET` / `HEAL_SKILL_INT_SCALE` を使った INT ベース式で計算する。アイテム回復は固定値のまま。
 
 ### DungeonManager（game/dungeon.py）
 `db: Session`, `dungeon: Dungeon`, `progress: DungeonProgress` を受け取る。  

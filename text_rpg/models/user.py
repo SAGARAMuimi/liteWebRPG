@@ -33,6 +33,10 @@ class User(Base):
     is_admin: Mapped[int] = mapped_column(
         default=0, nullable=False, server_default="0"
     )
+    # ── R-28 バトルスピード設定 ──────────────────────────────
+    battle_speed: Mapped[str] = mapped_column(
+        String(8), default="normal", nullable=False, server_default="'normal'"
+    )
 
     # ──────────────────────────────────────────────────────
     def get_titles_list(self) -> list[str]:
@@ -139,6 +143,21 @@ class User(Base):
         if rank == 0:
             return 0
         return upgrade_def["bonuses"][rank - 1]
+
+    # ── R-28 バトルスピード ──────────────────────────────────
+    @staticmethod
+    def get_battle_speed(db: Session, user_id: int) -> str:
+        """ユーザーのバトルスピード設定を返す（未設定時は 'normal'）"""
+        user = db.query(User).filter(User.id == user_id).first()
+        return (user.battle_speed or "normal") if user else "normal"
+
+    @staticmethod
+    def set_battle_speed(db: Session, user_id: int, speed: str) -> None:
+        """バトルスピード設定を保存する"""
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            user.battle_speed = speed
+            db.commit()
 
     # ──────────────────────────────────────────────────────
     @staticmethod

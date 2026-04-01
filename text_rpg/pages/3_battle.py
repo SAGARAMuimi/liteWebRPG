@@ -14,11 +14,12 @@ from models.character import PartyMember
 from models.skill import Skill
 from models.item import Item
 from models.inventory import Inventory
+from models.equipment import Equipment, CharacterEquipment
 from game.battle import BattleEngine
 from models.user import User
 from utils.auth import check_login, get_current_user_id
 from utils.helpers import hp_bar, class_display_name
-from config import APP_TITLE, DIFFICULTY_PRESETS, STATUS_AILMENTS, LEVEL_UP_PLANS, CLASS_DEFAULT_LEVELUP_PLAN, ALLY_POLICIES, CLASS_DEFAULT_POLICY, CLASS_INTELLIGENCE, META_GOLD_KEEP_RATE
+from config import APP_TITLE, DIFFICULTY_PRESETS, STATUS_AILMENTS, LEVEL_UP_PLANS, CLASS_DEFAULT_LEVELUP_PLAN, ALLY_POLICIES, CLASS_DEFAULT_POLICY, CLASS_INTELLIGENCE, META_GOLD_KEEP_RATE, EXP_PER_LEVEL
 
 st.set_page_config(page_title=f"戦闘 | {APP_TITLE}", page_icon="⚔️", layout="wide")
 check_login()
@@ -89,19 +90,33 @@ if "auto_battle_enabled" not in st.session_state:
     st.session_state["auto_battle_enabled"] = False
 if "ally_policies" not in st.session_state:
     st.session_state["ally_policies"] = {}
-if "auto_turn_wait" not in st.session_state:
-    st.session_state["auto_turn_wait"] = 5
+if "battle_speed" not in st.session_state:
+    # DB からバトルスピード設定を読み込む（R-28）
+    with SessionLocal() as _spd_db:
+        st.session_state["battle_speed"] = User.get_battle_speed(_spd_db, user_id)
+if "party_equipment" not in st.session_state:
+    st.session_state["party_equipment"] = {}
 
-# 戦闘開始時にインベントリを DB からロード（battle_enemies が初層に設定されたタイミング）
+# 戦闘開始時にインベントリ・装備情報を DB からロード（battle_enemies が初回セットされたタイミング）
 if not st.session_state["battle_inventory"] and st.session_state.get("battle_enemies"):
     with SessionLocal() as db:
         inv_rows = Inventory.get_by_user(db, user_id)
         _all_items = {item.id: item for item in Item.get_all(db)}
+        _all_equips_map = {e.id: e for e in Equipment.get_all(db)}
+        _party_equip_cache: dict = {}
+        for _c in party:
+            _slots: dict = {}
+            for _ce in CharacterEquipment.get_for_character(db, _c.id):
+                _eq = _all_equips_map.get(_ce.equipment_id)
+                if _eq:
+                    _slots[_ce.slot] = _eq.name
+            _party_equip_cache[_c.id] = _slots
     st.session_state["battle_inventory"] = [
         {"item": _all_items[row.item_id], "quantity": row.quantity}
         for row in inv_rows
         if row.item_id in _all_items
     ]
+    st.session_state["party_equipment"] = _party_equip_cache
 
 _diff_cfg = DIFFICULTY_PRESETS[st.session_state.get("difficulty", "normal")]
 # メタアップグレードボーナスを取得
@@ -298,8 +313,17 @@ for i, chara in enumerate(party):
         st.caption(class_display_name(chara.class_type))
         st.text(hp_bar(chara.hp, chara.max_hp))
         st.text(f"MP {chara.mp}/{chara.max_mp}")
+        st.text(f"ATK {chara.attack}  DEF {chara.defense}")
         if _cbuffs:
             st.caption("  ".join(_buff_tag(b) for b in _cbuffs))
+        with st.expander("詳細 ▼"):
+            _exp_to_next = chara.level * EXP_PER_LEVEL - chara.exp
+            st.text(f"Lv {chara.level}  EXP {chara.exp} / {chara.level * EXP_PER_LEVEL}（残 {_exp_to_next}）")
+            st.text(f"INT {chara.intelligence}")
+            _equip_slots = st.session_state.get("party_equipment", {}).get(chara.id, {})
+            st.text(f"⚔️  武器: {_equip_slots.get('weapon', 'なし')}")
+            st.text(f"🛡️  防具: {_equip_slots.get('armor', 'なし')}")
+            st.text(f"💍  アクセサリ: {_equip_slots.get('accessory', 'なし')}")
 
 st.divider()
 
@@ -354,17 +378,26 @@ if auto_mode:
                     key=f"policy_{_pc.id}",
                 )
                 st.session_state["ally_policies"][_pc.id] = _chosen
-        # 待機秒数スライダー
-        st.session_state["auto_turn_wait"] = st.slider(
-            "⏱️ 待機秒数（行動ごと）",
-            min_value=1, max_value=10,
-            value=st.session_state["auto_turn_wait"],
-            step=1,
-            key="wait_slider",
+        # バトルスピード選択（R-28）
+        _SPEED_OPTIONS = {"fast": "⚡ 速い", "normal": "▶️ 普通", "slow": "🐢 遅い"}
+        _speed_keys = list(_SPEED_OPTIONS.keys())
+        _cur_speed = st.session_state.get("battle_speed", "normal")
+        _chosen_speed = st.radio(
+            "⚡ バトルスピード",
+            _speed_keys,
+            index=_speed_keys.index(_cur_speed) if _cur_speed in _speed_keys else 1,
+            format_func=lambda k: _SPEED_OPTIONS[k],
+            horizontal=True,
+            key="speed_radio",
         )
+        if _chosen_speed != _cur_speed:
+            st.session_state["battle_speed"] = _chosen_speed
+            with SessionLocal() as db:
+                User.set_battle_speed(db, user_id, _chosen_speed)
 
+    _SPEED_SECONDS = {"fast": 0.5, "normal": 1.5, "slow": 3.0}
     if st.button("▶ 全員行動", use_container_width=True, type="primary"):
-        _wait = st.session_state["auto_turn_wait"]
+        _wait = _SPEED_SECONDS.get(st.session_state.get("battle_speed", "normal"), 1.5)
         _live = st.empty()  # ライブ表示プレースホルダー
         # ── 味方1人行動 → 敵全員行動 を人数分繰り返す ──
         for _ac in alive_party:
@@ -378,7 +411,11 @@ if auto_mode:
                 _skills = Skill.get_for_class(db, _ac.class_type)
             _msg = engine.ally_auto_action(
                         _ac, _pol, _skills,
-                        intelligence=CLASS_INTELLIGENCE.get(_ac.class_type, 5)
+                        intelligence=getattr(
+                            _ac,
+                            "intelligence",
+                            CLASS_INTELLIGENCE.get(_ac.class_type, 5),
+                        )
                     )
             st.session_state["battle_log"].append(_msg)
             _live.info(f"🗡️ {_msg}")

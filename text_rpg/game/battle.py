@@ -17,6 +17,7 @@ game/battle.py - BattleEngine クラス
 
 from __future__ import annotations
 import random
+from config import HEAL_SKILL_INT_BASE_OFFSET, HEAL_SKILL_INT_SCALE
 from models.character import Character
 from models.enemy import Enemy
 from models.skill import Skill
@@ -30,30 +31,50 @@ _STATUS_NAMES: dict[str, str] = {
 
 
 # ─── 味方AI 知性値補助関数（Section 8）────────────────────────────────────
+def clamp_ai_intelligence(intelligence: int | None, default: int = 5) -> int:
+    """AI 判断用の知性値を 1〜10 に正規化する。None は default を使う。"""
+    resolved = default if intelligence is None else intelligence
+    return max(1, min(10, resolved))
+
+
 def calc_heal_threshold(intelligence: int, key: str) -> float:
     """
-    知性値（1〜10）から回復しきい値を線形補間して返す。
+    知性値（1〜10。10超は10扱い）から回復しきい値を線形補間して返す。
     key: "critical" | "hurt"
     - intelligence=1: critical=15% / hurt=45%
     - intelligence=10: critical=50% / hurt=85%
     """
     BASES: dict[str, float] = {"critical": 0.15, "hurt": 0.45}
     MAXES: dict[str, float] = {"critical": 0.50, "hurt": 0.85}
+    intelligence = clamp_ai_intelligence(intelligence)
     ratio = (intelligence - 1) / 9
     return BASES[key] + (MAXES[key] - BASES[key]) * ratio
 
 
 def calc_finish_multiplier(intelligence: int) -> float:
     """
-    知性値に応じた「止め刷し判断の攻撃倍率上限」を返す。
+    知性値（1〜10。10超は10扱い）に応じた「止め刷し判断の攻撃倍率上限」を返す。
     enemy.hp <= (atk - def) * multiplier のとき攻撃に転換。
     - intelligence=1 : 0.8（1撃以下でも実跳的に判断しない）
     - intelligence=5 : ≈ 1.33（1撃圈内なら攻撃）
     - intelligence=10: 2.0（2撃圈内なら攻撃）
     """
+    intelligence = clamp_ai_intelligence(intelligence)
     if intelligence <= 1:
         return 0.8
     return 0.8 + (intelligence - 1) * (1.2 / 9)
+
+
+def calc_heal_amount(skill_power: int, intelligence: int | None, heal_mult: float) -> int:
+    """回復系スキルの実回復量を返す。
+
+    式: (skill.power + HEAL_SKILL_INT_BASE_OFFSET + intelligence * HEAL_SKILL_INT_SCALE) * heal_mult
+    - intelligence が None の場合は後方互換のため 5 を使う
+    - AI 判断とは異なり、回復量計算では 10 超の intelligence もそのまま反映する
+    """
+    caster_intelligence = max(1, 5 if intelligence is None else intelligence)
+    base_amount = skill_power + HEAL_SKILL_INT_BASE_OFFSET + HEAL_SKILL_INT_SCALE * caster_intelligence
+    return max(1, int(base_amount * heal_mult))
 
 
 class EnemyAI:
@@ -63,6 +84,7 @@ class EnemyAI:
     def get_phase(enemy: "Enemy", max_hp: int, intelligence: int = 2) -> str:
         """NORMAL / DANGER を返す"""
         from config import INTELLIGENCE_THRESHOLDS
+        intelligence = clamp_ai_intelligence(intelligence, default=2)
         threshold = INTELLIGENCE_THRESHOLDS.get(intelligence, 0.50)
         ratio = enemy.hp / max(1, max_hp)
         return "DANGER" if ratio <= threshold else "NORMAL"
@@ -71,6 +93,7 @@ class EnemyAI:
     def is_win_first(party: list["Character"], intelligence: int = 2) -> bool:
         """瞀死のパーティメンバーがいるか（知性値で閾値変化）"""
         from config import WIN_FIRST_THRESHOLDS
+        intelligence = clamp_ai_intelligence(intelligence, default=2)
         threshold = WIN_FIRST_THRESHOLDS.get(intelligence, 0.15)
         for c in party:
             if c.is_alive() and c.max_hp > 0 and c.hp / c.max_hp <= threshold:
@@ -93,6 +116,7 @@ class EnemyAI:
         """
         import random
         from config import ENEMY_AI_ACTIONS
+        intelligence = clamp_ai_intelligence(intelligence, default=2)
         pattern = ENEMY_AI_ACTIONS.get(enemy.name, ENEMY_AI_ACTIONS["default"])
         if phase == "DANGER":
             priority = pattern.get("danger_priority", ["attack"])
@@ -378,7 +402,11 @@ class BattleEngine:
 
             elif etype == "heal":
                 heal_target = target if (target is not None and hasattr(target, "class_type")) else character
-                heal_amount = max(1, int((character.attack + skill.power) * self.heal_mult))
+                heal_amount = calc_heal_amount(
+                    skill.power,
+                    getattr(character, "intelligence", 5),
+                    self.heal_mult,
+                )
                 healed = heal_target.heal(heal_amount)
                 self.add_hate(character, max(1, healed // 2))
                 return f"{character.name} の {skill.name}！ {heal_target.name} の HP が {healed} 回復！"
@@ -484,7 +512,7 @@ class BattleEngine:
                 messages.append(f"{enemy.name} はスタン状態で行動できない！")
                 continue
 
-            intelligence = getattr(enemy, "intelligence", 2)
+            intelligence = getattr(enemy, "intelligence", 2) or 2
             max_hp  = self.enemy_max_hp.get(enemy.id, enemy.hp)
             phase   = EnemyAI.get_phase(enemy, max_hp, intelligence)
             rot_idx = self.enemy_rotation_idx.get(enemy.id, 0)
@@ -674,9 +702,10 @@ class BattleEngine:
         """
         指定ポリシーに従ってキャラクターを自動行動させる。
         policy: "attack" | "heal" | "defend"
-        intelligence: 1〜10 スケール（デフォルト 5 = 標準）
+        intelligence: 1〜10 スケール（10超は10扱い。デフォルト 5 = 標準）
         Returns: 戦闘ログ文字列
         """
+        intelligence = clamp_ai_intelligence(intelligence, default=5)
         if not character.is_alive():
             return f"{character.name} は戦闘不能のため行動できない。"
 
